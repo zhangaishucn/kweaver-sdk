@@ -28,7 +28,7 @@ def _mock_client():
 def test_cli_help(runner):
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
-    for cmd in ("auth", "kn", "query", "action", "agent", "call"):
+    for cmd in ("auth", "kn", "query", "action", "agent", "call", "ds"):
         assert cmd in result.output
 
 
@@ -397,3 +397,53 @@ def test_handle_errors_auth_error(runner):
     result = runner.invoke(cli, ["_test_auth_error"])
     assert result.exit_code != 0
     assert "认证失败" in result.output or "bad token" in result.output or "认证失败" in (result.stderr or "")
+
+
+# ---------------------------------------------------------------------------
+# DS subcommands
+# ---------------------------------------------------------------------------
+
+
+def test_ds_list(runner):
+    with patch("kweaver.cli.ds.make_client") as mock_make:
+        client = _mock_client()
+        mock_ds = MagicMock()
+        mock_ds.model_dump.return_value = {"id": "ds1", "name": "mydb", "type": "mysql"}
+        client.datasources.list.return_value = [mock_ds]
+        mock_make.return_value = client
+        result = runner.invoke(cli, ["ds", "list"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data[0]["id"] == "ds1"
+
+
+def test_ds_list_with_filters(runner):
+    with patch("kweaver.cli.ds.make_client") as mock_make:
+        client = _mock_client()
+        client.datasources.list.return_value = []
+        mock_make.return_value = client
+        result = runner.invoke(cli, ["ds", "list", "--keyword", "test", "--type", "mysql"])
+        assert result.exit_code == 0
+        client.datasources.list.assert_called_once_with(keyword="test", type="mysql")
+
+
+def test_ds_get(runner):
+    with patch("kweaver.cli.ds.make_client") as mock_make:
+        client = _mock_client()
+        mock_ds = MagicMock()
+        mock_ds.model_dump.return_value = {"id": "ds1", "name": "mydb"}
+        client.datasources.get.return_value = mock_ds
+        mock_make.return_value = client
+        result = runner.invoke(cli, ["ds", "get", "ds1"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["id"] == "ds1"
+
+
+def test_ds_delete(runner):
+    with patch("kweaver.cli.ds.make_client") as mock_make:
+        client = _mock_client()
+        mock_make.return_value = client
+        result = runner.invoke(cli, ["ds", "delete", "ds1"], input="y\n")
+        assert result.exit_code == 0
+        client.datasources.delete.assert_called_once_with("ds1")
