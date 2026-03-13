@@ -364,3 +364,36 @@ def test_call_empty_response(runner):
         result = runner.invoke(cli, ["call", "/api/test", "-X", "DELETE"])
         assert result.exit_code == 0
         assert "empty response" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Error handler
+# ---------------------------------------------------------------------------
+
+
+def test_handle_errors_adp_error(runner):
+    from kweaver.cli._helpers import handle_errors
+
+    @cli.command("_test_error")
+    @handle_errors
+    def _test_error():
+        from kweaver._errors import ADPError
+        raise ADPError("something broke", status_code=500)
+
+    result = runner.invoke(cli, ["_test_error"])
+    assert result.exit_code != 0
+    assert "something broke" in result.output or "something broke" in (result.stderr or "")
+
+
+def test_handle_errors_auth_error(runner):
+    from kweaver.cli._helpers import handle_errors
+
+    @cli.command("_test_auth_error")
+    @handle_errors
+    def _test_auth_error():
+        from kweaver._errors import AuthenticationError
+        raise AuthenticationError("bad token")
+
+    result = runner.invoke(cli, ["_test_auth_error"])
+    assert result.exit_code != 0
+    assert "认证失败" in result.output or "bad token" in result.output or "认证失败" in (result.stderr or "")

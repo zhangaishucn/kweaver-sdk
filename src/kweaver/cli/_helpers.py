@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import os
 import sys
+from functools import wraps
 from typing import Any
 
 import click
 
 from kweaver._auth import ConfigAuth, TokenAuth
 from kweaver._client import ADPClient
+from kweaver._errors import ADPError, AuthenticationError, AuthorizationError, NotFoundError
 
 
 def make_client() -> ADPClient:
@@ -35,3 +37,20 @@ def pp(data: Any) -> None:
 def error_exit(msg: str, code: int = 1) -> None:
     click.echo(f"Error: {msg}", err=True)
     sys.exit(code)
+
+
+def handle_errors(fn):
+    """Decorator: catch SDK errors and exit with a user-friendly message."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except AuthenticationError as e:
+            error_exit(f"认证失败: {e.message}")
+        except AuthorizationError as e:
+            error_exit(f"无权限: {e.message}")
+        except NotFoundError as e:
+            error_exit(f"未找到: {e.message}")
+        except ADPError as e:
+            error_exit(f"错误: {e.message}")
+    return wrapper
