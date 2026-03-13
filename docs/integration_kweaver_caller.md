@@ -329,11 +329,14 @@ kweaver call <url> [-X METHOD] [-H HEADER] [-d BODY]   # 通用 API 调用
 
 ### 5.1 分层关系
 
-> **v0.6 更新**: Skill 层已删除。CLI 是最上层，直接调用 SDK。
+> **v0.6 更新**: 原 Skill 层的 Python 类已删除。Skill 层现在仅指 SKILL.md（Agent 操作手册）。
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  CLI 层（最上层，面向 AI Agent 和终端用户）                  │
+│  Skill 层（最上层，面向 AI Agent）                          │
+│  SKILL.md — Agent 操作手册，意图→命令映射                  │
+├──────────────────────────────────────────────────────────┤
+│  CLI 层（面向终端用户和 AI Agent）                          │
 │  kweaver 命令行，多步编排、JSON 输出                       │
 ├──────────────────────────────────────────────────────────┤
 │  SDK 层（面向开发者）                                      │
@@ -346,8 +349,9 @@ kweaver call <url> [-X METHOD] [-H HEADER] [-d BODY]   # 通用 API 调用
 
 依赖方向：
 ```
-CLI ──→ SDK ──→ HTTP     (AI Agent / 终端用户通过 CLI)
-        SDK ──→ HTTP     (开发者直接使用 Python SDK)
+Skill (SKILL.md) ──→ CLI ──→ SDK ──→ HTTP   (AI Agent)
+                     CLI ──→ SDK ──→ HTTP   (终端用户)
+                             SDK ──→ HTTP   (开发者)
 ```
 
 ### 5.2 目录变更

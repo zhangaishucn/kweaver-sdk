@@ -8,11 +8,15 @@ KWeaver (ADP) 平台提供了知识网络构建、语义搜索、Decision Agent 
 
 ## 架构
 
-三层分离，依赖方向自上而下：
+四层分离，依赖方向自上而下：
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  CLI 层（最上层，面向 AI 智能体和终端用户）                  │
+│  Skill 层（最上层，面向 AI 智能体）                         │
+│  SKILL.md — Agent 的操作手册，描述意图→命令的映射           │
+│  由 Claude Code / Cursor / GPT 等智能体平台加载            │
+├─────────────────────────────────────────────────────────┤
+│  CLI 层（面向终端用户和 AI 智能体）                         │
 │  kweaver 命令行 — 编排多步操作、格式化输出                  │
 │  ds connect / kn create / query search / agent chat …   │
 ├─────────────────────────────────────────────────────────┤
@@ -27,15 +31,16 @@ KWeaver (ADP) 平台提供了知识网络构建、语义搜索、Decision Agent 
 
 | 层 | 用户 | 职责 | 输出 |
 |---|---|---|---|
+| **Skill** | AI Agent（Claude Code 等） | 意图→命令映射，操作手册，上下文引导 | Agent 调用 CLI 命令 |
 | **CLI** | AI Agent / 终端用户 | 多步编排（连接→建模→构建）、错误处理、JSON 输出 | 结构化 JSON |
 | **SDK** | 开发者（Python 代码） | 1:1 映射 ADP REST API、类型安全、参数转换 | Pydantic 模型 |
 | **HTTP** | 内部 | 传输、认证注入、重试、日志脱敏 | httpx.Response |
 
 **设计原则：**
 
+- **Skill 是 Agent 的入口** — SKILL.md 告诉 Agent 有哪些能力、如何组合命令完成任务
 - **CLI 是唯一的编排层** — 所有多步操作（如 `ds connect` = 测试连通 → 注册 → 发现表）都在 CLI 内完成
 - **SDK 是纯 CRUD** — 每个 Resource 方法对应一个 REST 端点，不包含业务流程
-- **AI 智能体通过 shell 调用 CLI** — SKILL.md 只记录 `kweaver` 命令，不需要写 Python 代码
 
 ## 前置条件
 
