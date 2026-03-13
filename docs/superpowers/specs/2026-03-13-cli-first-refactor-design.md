@@ -1,7 +1,7 @@
 # CLI-First Architecture Refactor
 
 **Date:** 2026-03-13
-**Status:** Approved
+**Status:** Completed (v0.6.0)
 
 ## Problem
 

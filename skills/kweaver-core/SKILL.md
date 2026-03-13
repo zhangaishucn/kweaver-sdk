@@ -32,9 +32,9 @@ pip install -e "/path/to/kweaver-sdk[cli]"
 
 CLI 按以下顺序尝试认证（无需用户干预）：
 
-1. **ConfigAuth**（推荐）— 读取 `~/.kweaver/` 凭据（与 kweaverc CLI 共享），自动刷新 Token
-2. **PasswordAuth** — 通过 `ADP_USERNAME` + `ADP_PASSWORD` 环境变量
-3. **TokenAuth** — 通过 `ADP_TOKEN` 环境变量
+1. **TokenAuth** — `ADP_TOKEN` + `ADP_BASE_URL` 环境变量同时存在时优先使用（静态 Token，不自动刷新）
+2. **PasswordAuth** — `ADP_USERNAME` + `ADP_PASSWORD` + `ADP_BASE_URL` 均存在时，通过 Playwright 浏览器自动登录获取并自动刷新 Token（需 `playwright install chromium`）
+3. **ConfigAuth**（推荐长期使用）— 读取 `~/.kweaver/` 凭据（由 `kweaver auth login` 写入），自动刷新 Token
 
 环境变量 `ADP_BASE_URL` 和 `ADP_BUSINESS_DOMAIN` 用于指定平台地址和业务域。
 
