@@ -691,3 +691,36 @@ def test_agent_history_with_limit(runner):
         result = runner.invoke(cli, ["agent", "history", "conv1", "--limit", "10"])
         assert result.exit_code == 0
         client.conversations.list_messages.assert_called_once_with("conv1", limit=10)
+
+
+# ---------------------------------------------------------------------------
+# Action execute --action-name
+# ---------------------------------------------------------------------------
+
+
+def test_action_execute_by_name(runner):
+    with patch("kweaver.cli.action.make_client") as mock_make:
+        client = _mock_client()
+        mock_search = MagicMock()
+        mock_search.action_types = [{"id": "at_resolved", "name": "sync_data"}]
+        client.query.kn_search.return_value = mock_search
+        mock_exec = MagicMock(); mock_exec.execution_id = "exec1"
+        mock_exec_done = MagicMock(); mock_exec_done.status = "completed"; mock_exec_done.result = {"ok": True}
+        mock_exec.wait.return_value = mock_exec_done
+        client.action_types.execute.return_value = mock_exec
+        mock_make.return_value = client
+        result = runner.invoke(cli, ["action", "execute", "kn1", "--action-name", "sync_data"])
+        assert result.exit_code == 0
+        assert "completed" in result.output
+        client.query.kn_search.assert_called_once()
+
+
+def test_action_execute_by_name_not_found(runner):
+    with patch("kweaver.cli.action.make_client") as mock_make:
+        client = _mock_client()
+        mock_search = MagicMock()
+        mock_search.action_types = []
+        client.query.kn_search.return_value = mock_search
+        mock_make.return_value = client
+        result = runner.invoke(cli, ["action", "execute", "kn1", "--action-name", "nonexistent"])
+        assert result.exit_code != 0

@@ -6,7 +6,7 @@ import json
 
 import click
 
-from kweaver.cli._helpers import error_exit, make_client, pp
+from kweaver.cli._helpers import error_exit, handle_errors, make_client, pp
 
 
 @click.group("action")
@@ -26,13 +26,24 @@ def query_action(kn_id: str, action_type_id: str) -> None:
 
 @action_group.command("execute")
 @click.argument("kn_id")
-@click.argument("action_type_id")
+@click.argument("action_type_id", required=False, default=None)
+@click.option("--action-name", default=None, help="Resolve action type by name (via kn_search).")
 @click.option("--params", "params_json", default=None, help="JSON execution parameters.")
 @click.option("--wait/--no-wait", default=True)
 @click.option("--timeout", default=300, type=int)
-def execute_action(kn_id: str, action_type_id: str, params_json: str | None, wait: bool, timeout: int) -> None:
+@handle_errors
+def execute_action(kn_id: str, action_type_id: str | None, action_name: str | None,
+                   params_json: str | None, wait: bool, timeout: int) -> None:
     """Execute an action type."""
     client = make_client()
+    if not action_type_id and not action_name:
+        error_exit("Either ACTION_TYPE_ID or --action-name must be provided")
+    if action_name and not action_type_id:
+        search_result = client.query.kn_search(kn_id, action_name)
+        actions = search_result.action_types or []
+        if not actions:
+            error_exit(f"Action type '{action_name}' not found")
+        action_type_id = actions[0]["id"]
     params = json.loads(params_json) if params_json else None
 
     execution = client.action_types.execute(kn_id, action_type_id, params=params)
