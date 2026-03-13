@@ -1,0 +1,23 @@
+{
+  "name": "kweaver-sdk",
+  "version": "0.5.0",
+  "description": "KWeaver/ADP Python SDK — Agent skills for knowledge network construction, querying, and Decision Agent conversations.",
+  "keywords": [
+    "kweaver",
+    "adp",
+    "knowledge-network",
+    "sdk",
+    "python"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kweaver-ai/kweaver-sdk.git"
+  },
+  "license": "MIT",
+  "files": [
+    "skills"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

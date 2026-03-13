@@ -29,7 +29,7 @@ pip install -e "/path/to/kweaver-sdk[cli]"  # 含 CLI
 通过 skills.sh 安装到 Agent 平台：
 
 ```bash
-npx skills add <repo>/kweaver-sdk --skill kweaver-core
+npx skills add kweaver-ai/kweaver-sdk --skill kweaver-core
 ```
 
 ## 使用前提
