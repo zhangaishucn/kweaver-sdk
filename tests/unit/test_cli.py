@@ -476,3 +476,56 @@ def test_ds_tables_with_keyword(runner):
         result = runner.invoke(cli, ["ds", "tables", "ds1", "--keyword", "user"])
         assert result.exit_code == 0
         client.datasources.list_tables.assert_called_once_with("ds1", keyword="user")
+
+
+def _extract_json(output: str):
+    """Extract and parse the first JSON object/array from mixed output."""
+    for i, ch in enumerate(output):
+        if ch in ('{', '['):
+            return json.loads(output[i:])
+    raise ValueError("No JSON found in output")
+
+
+def test_ds_connect(runner):
+    with patch("kweaver.cli.ds.make_client") as mock_make:
+        client = _mock_client()
+        mock_ds = MagicMock()
+        mock_ds.id = "ds1"
+        client.datasources.test.return_value = True
+        client.datasources.create.return_value = mock_ds
+        mock_table = MagicMock()
+        mock_col = MagicMock()
+        mock_col.name = "id"
+        mock_col.type = "integer"
+        mock_col.comment = None
+        mock_table.name = "users"
+        mock_table.columns = [mock_col]
+        client.datasources.list_tables.return_value = [mock_table]
+        mock_make.return_value = client
+        result = runner.invoke(cli, [
+            "ds", "connect", "mysql", "localhost", "3306", "testdb",
+            "--account", "root", "--password", "secret",
+        ])
+        assert result.exit_code == 0
+        data = _extract_json(result.output)
+        assert data["datasource_id"] == "ds1"
+        assert data["tables"][0]["name"] == "users"
+
+
+def test_ds_connect_with_schema_and_name(runner):
+    with patch("kweaver.cli.ds.make_client") as mock_make:
+        client = _mock_client()
+        mock_ds = MagicMock()
+        mock_ds.id = "ds2"
+        client.datasources.test.return_value = True
+        client.datasources.create.return_value = mock_ds
+        client.datasources.list_tables.return_value = []
+        mock_make.return_value = client
+        result = runner.invoke(cli, [
+            "ds", "connect", "postgresql", "db.host", "5432", "mydb",
+            "--account", "admin", "--password", "pw",
+            "--schema", "public", "--name", "my-datasource",
+        ])
+        assert result.exit_code == 0
+        data = _extract_json(result.output)
+        assert data["datasource_id"] == "ds2"

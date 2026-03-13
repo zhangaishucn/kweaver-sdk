@@ -61,3 +61,45 @@ def tables(datasource_id: str, keyword: str | None) -> None:
         }
         for t in tables
     ])
+
+
+@ds_group.command("connect")
+@click.argument("db_type")
+@click.argument("host")
+@click.argument("port", type=int)
+@click.argument("database")
+@click.option("--account", required=True, help="Database account.")
+@click.option("--password", required=True, help="Database password.")
+@click.option("--schema", default=None, help="Database schema.")
+@click.option("--name", default=None, help="Datasource name (defaults to database name).")
+@handle_errors
+def connect(
+    db_type: str, host: str, port: int, database: str,
+    account: str, password: str, schema: str | None, name: str | None,
+) -> None:
+    """Connect a database: test, register, and discover tables."""
+    client = make_client()
+    click.echo("Testing connectivity ...", err=True)
+    client.datasources.test(
+        type=db_type, host=host, port=port,
+        database=database, account=account, password=password, schema=schema,
+    )
+    ds_name = name or database
+    ds = client.datasources.create(
+        name=ds_name, type=db_type, host=host, port=port,
+        database=database, account=account, password=password, schema=schema,
+    )
+    found_tables = client.datasources.list_tables(ds.id)
+    pp({
+        "datasource_id": ds.id,
+        "tables": [
+            {
+                "name": t.name,
+                "columns": [
+                    {"name": c.name, "type": c.type, "comment": c.comment}
+                    for c in t.columns
+                ],
+            }
+            for t in found_tables
+        ],
+    })
