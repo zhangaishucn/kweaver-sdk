@@ -1,7 +1,7 @@
 {
   "name": "kweaver-sdk",
-  "version": "0.5.0",
-  "description": "KWeaver/ADP Python SDK — Agent skills for knowledge network construction, querying, and Decision Agent conversations.",
+  "version": "0.6.0",
+  "description": "KWeaver SDK monorepo — Python SDK + TypeScript CLI + Claude skills",
   "keywords": [
     "kweaver",
     "adp",
