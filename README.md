@@ -2,214 +2,104 @@
 
 让 AI 智能体（Claude Code、GPT、自定义 Agent 等）通过 `kweaver` CLI 命令访问 KWeaver 平台的知识网络与 Decision Agent。同时提供 Python SDK 供程序化集成。
 
-## 这个项目解决什么问题
+## 安装
 
-KWeaver 平台提供了知识网络构建、语义搜索、Decision Agent 对话等能力，但这些能力藏在复杂的 REST API 背后。本项目提供 **`kweaver` CLI 命令行工具**，智能体直接调用 shell 命令即可完成操作，无需了解底层 API 细节。
-
-## 架构
-
-四层分离，依赖方向自上而下：
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Skill 层（最上层，面向 AI 智能体）                         │
-│  SKILL.md — Agent 的操作手册，描述意图→命令的映射           │
-│  由 Claude Code / Cursor / GPT 等智能体平台加载            │
-├─────────────────────────────────────────────────────────┤
-│  CLI 层（面向终端用户和 AI 智能体）                         │
-│  kweaver 命令行 — 编排多步操作、格式化输出                  │
-│  ds connect / kn create / query search / agent chat …   │
-├─────────────────────────────────────────────────────────┤
-│  SDK 层（面向开发者）                                      │
-│  Python API，1:1 映射 KWeaver 概念                            │
-│  datasources · knowledge_networks · query · agents …    │
-├─────────────────────────────────────────────────────────┤
-│  HTTP 层 + Config 层                                     │
-│  httpx / 认证 / 重试 / ~/.kweaver/ 凭据管理               │
-└─────────────────────────────────────────────────────────┘
-```
-
-| 层 | 用户 | 职责 | 输出 |
-|---|---|---|---|
-| **Skill** | AI Agent（Claude Code 等） | 意图→命令映射，操作手册，上下文引导 | Agent 调用 CLI 命令 |
-| **CLI** | AI Agent / 终端用户 | 多步编排（连接→建模→构建）、错误处理、JSON 输出 | 结构化 JSON |
-| **SDK** | 开发者（Python 代码） | 1:1 映射 KWeaver REST API、类型安全、参数转换 | Pydantic 模型 |
-| **HTTP** | 内部 | 传输、认证注入、重试、日志脱敏 | httpx.Response |
-
-**设计原则：**
-
-- **Skill 是 Agent 的入口** — SKILL.md 告诉 Agent 有哪些能力、如何组合命令完成任务
-- **CLI 是唯一的编排层** — 所有多步操作（如 `ds connect` = 测试连通 → 注册 → 发现表）都在 CLI 内完成
-- **SDK 是纯 CRUD** — 每个 Resource 方法对应一个 REST 端点，不包含业务流程
-
-## 前置条件
-
-1. **Python >= 3.10**
-2. **KWeaver 平台账号**
-3. 安装：
+### TypeScript CLI（推荐，含交互式 agent chat TUI）
 
 ```bash
-pip install kweaver-sdk[cli]    # CLI + SDK
+npm install -g kweaver-sdk
 ```
 
-## 认证
+需 Node.js 22+。安装后使用 `kweaver` 命令。
 
-提供四种认证方式，按推荐顺序：
-
-### 方式 A（推荐）：CLI 登录
-
-```bash
-kweaver auth login https://your-kweaver-instance.com
-kweaver auth login https://your-kweaver-instance.com --alias prod  # 设别名
-```
-
-登录后凭据存储在 `~/.kweaver/`，所有命令自动使用。与 kweaverc (TypeScript CLI) 共享凭据。
-
-### 方式 B：环境变量
-
-```bash
-export KWEAVER_BASE_URL="https://your-kweaver-instance.com"
-export KWEAVER_BUSINESS_DOMAIN="bd_public"
-export KWEAVER_TOKEN="Bearer ory_at_xxxxx"    # 或 KWEAVER_USERNAME + KWEAVER_PASSWORD
-```
-
-> **注意**: `KWEAVER_BUSINESS_DOMAIN` 是必填项。不传或传错会导致 API 返回空结果或 Bad Request。
-
----
-
-## CLI 命令
-
-### 数据源管理
-
-```bash
-# 连接数据库：测试连通性、注册、发现表
-kweaver ds connect mysql 10.0.1.100 3306 erp_prod \
-    --account readonly --password xxx
-# -> {"datasource_id": "ds_01", "tables": [...]}
-
-kweaver ds list [--keyword <filter>] [--type <db-type>]
-kweaver ds get <datasource-id>
-kweaver ds delete <datasource-id>
-kweaver ds tables <datasource-id> [--keyword <filter>]
-```
-
-### 知识网络
-
-```bash
-# 从数据源创建知识网络（自动检测主键/显示键）
-kweaver kn create <datasource-id> --name 供应链 \
-    [--tables orders,products] [--no-build] [--timeout 600]
-# -> {"kn_id": "kn_abc", "object_types": [...], "status": "completed"}
-
-kweaver kn list [--name <filter>]
-kweaver kn get <kn-id>
-kweaver kn export <kn-id>              # 导出完整定义（对象类型、关系类型、属性）
-kweaver kn build <kn-id> [--no-wait]
-kweaver kn delete <kn-id>
-```
-
-### 查询
-
-```bash
-kweaver query search <kn-id> "高库存的产品"
-kweaver query instances <kn-id> <ot-id> [--condition '<json>'] [--limit N]
-kweaver query kn-search <kn-id> "<query>" [--only-schema]
-kweaver query subgraph <kn-id> \
-    --start-type products \
-    --start-condition '{"field":"category","operation":"eq","value":"电子"}' \
-    --path has_inventory,belongs_to_supplier
-```
-
-### Action
-
-```bash
-kweaver action query <kn-id> <at-id>
-kweaver action execute <kn-id> <at-id> [--params '<json>'] [--no-wait]
-kweaver action execute <kn-id> --action-name 库存盘点   # 按名称查找
-kweaver action logs <kn-id> [--limit N]
-kweaver action log <kn-id> <log-id>
-```
-
-### Agent
-
-```bash
-kweaver agent list [--keyword <text>]
-kweaver agent chat <agent-id> -m "华东仓库库存情况"
-kweaver agent chat <agent-id> -m "和上月比呢？" --conversation-id <id>
-kweaver agent sessions <agent-id>       # 列出会话
-kweaver agent history <conversation-id> # 查看消息历史
-```
-
-### 通用 API 调用
-
-```bash
-kweaver call /api/ontology-manager/v1/knowledge-networks
-kweaver call /api/test -X POST -d '{"key":"val"}'
-```
-
----
-
-## 典型流程
-
-| 场景 | CLI 命令 |
-|---|---|
-| 从零构建知识网络 | `ds connect` → `kn create` → `kn export` → `query search` |
-| 探索已有知识网络 | `kn list` → `kn export <kn-id>` → `query instances` |
-| 与 Agent 对话 | `agent list` → `agent chat` → `agent sessions` → `agent history` |
-| 执行 Action | `action execute --action-name 库存盘点` |
-
-## Python SDK
-
-CLI 之外，也可以直接使用 Python SDK 进行程序化操作：
-
-```python
-from kweaver import KWeaverClient, ConfigAuth
-
-client = KWeaverClient(auth=ConfigAuth(), business_domain="bd_public")
-
-# 资源层 API
-kns = client.knowledge_networks.list()
-result = client.query.semantic_search(kn_id, "高库存的产品")
-```
-
-SDK 提供以下资源：`datasources`, `dataviews`, `knowledge_networks`, `object_types`, `relation_types`, `query`, `action_types`, `agents`, `conversations`。
-
-## 在 AI 智能体中使用
-
-### 安装 Skill
-
-通过 [skills.sh](https://skills.sh) 一键安装到 Claude Code、Cursor、OpenClaw 等支持 Skill 的智能体平台：
-
-```bash
-npx skills add kweaver-ai/kweaver-sdk --skill kweaver-core
-```
-
-安装后需确保运行环境有 Python >= 3.10 且已安装 SDK：
+### Python CLI（备用，用于测试或无 Node 环境）
 
 ```bash
 pip install kweaver-sdk[cli]
 ```
 
-### 认证
+需 Python >= 3.10。安装后同样使用 `kweaver` 命令。
 
-推荐先用 CLI 登录：
+### Python SDK（程序化调用）
+
+```bash
+pip install kweaver-sdk
+```
+
+```python
+from kweaver import KWeaverClient, ConfigAuth
+
+client = KWeaverClient(auth=ConfigAuth(), business_domain="bd_public")
+kns = client.knowledge_networks.list()
+```
+
+## 定位
+
+| 入口 | 安装方式 | 用途 |
+|------|----------|------|
+| **TS CLI** | `npm install -g kweaver-sdk` | 主力 CLI，含 Ink 交互式 TUI、流式 agent chat |
+| **Python CLI** | `pip install kweaver-sdk[cli]` | 备用 CLI，功能对齐，用于测试或纯 Python 环境 |
+| **Python SDK** | `pip install kweaver-sdk` | 程序化 API，`from kweaver import KWeaverClient` |
+
+两套 CLI 命令结构完全一致（`kweaver auth`、`kweaver kn`、`kweaver agent`、`kweaver context-loader` 等），凭据共享 `~/.kweaver/`。
+
+## 认证
 
 ```bash
 kweaver auth login https://your-kweaver-instance.com
+kweaver auth login https://your-kweaver-instance.com --alias prod
 ```
 
-### Claude Code（本地开发）
+或使用环境变量：`KWEAVER_BASE_URL`、`KWEAVER_BUSINESS_DOMAIN`、`KWEAVER_TOKEN`（或 `KWEAVER_USERNAME` + `KWEAVER_PASSWORD`）。
 
-在 kweaver-sdk 项目目录下工作时，Skill 自动加载（`.claude/skills/kweaver/SKILL.md`）。其他项目可通过上述 `npx skills add` 安装。
+## 命令速查
+
+```bash
+kweaver auth login/status/list/use/delete/logout
+kweaver token
+kweaver kn list/get/stats/export/create/update/delete
+kweaver kn object-type query/properties
+kweaver kn subgraph
+kweaver kn action-type query/execute
+kweaver kn action-execution get
+kweaver kn action-log list/get/cancel
+kweaver agent list/chat/sessions/history
+kweaver context-loader config set/use/list/show
+kweaver context-loader kn-search/query-object-instance/...
+kweaver call <path> [-X METHOD] [-d BODY] [-H header] [-bd domain]
+```
+
+Python CLI 额外提供：`kweaver ds`（数据源）、`kweaver query`（语义搜索、实例、子图）、`kweaver action`（高层编排）。
+
+## 项目结构（Monorepo）
+
+```
+kweaver-sdk/
+├── packages/
+│   ├── python/          # Python SDK + CLI
+│   └── typescript/      # TypeScript CLI
+├── skills/kweaver-core/ # AI Agent 操作手册
+├── docs/
+└── README.md
+```
 
 ## 开发与测试
 
 ```bash
-# 单元测试
-pytest
+# 运行所有测试（Python + TypeScript）
+make test
 
-# E2E 测试（需要 KWeaver 环境）
-pytest tests/e2e/ --run-destructive
+# 仅 Python
+make -C packages/python test
+
+# 仅 TypeScript
+make -C packages/typescript test
 ```
 
-E2E 测试推荐先用 `kweaver auth login` 登录，测试会自动使用 `~/.kweaver/` 凭据。
+## 在 AI 智能体中使用
+
+```bash
+npx skills add kweaver-ai/kweaver-sdk --skill kweaver-core
+```
+
+详见 [skills/kweaver-core/SKILL.md](skills/kweaver-core/SKILL.md)。

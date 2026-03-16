@@ -1,44 +1,52 @@
 # 知识网络管理与查询
 
-管理知识网络（KN），以及查询对象实例、子图、语义搜索。
+管理知识网络（KN），以及通过 ontology-query 查询对象、子图、属性和行动。
 
-## CLI 命令总览
+## 命令总览
 
-### 数据源管理
-
-| 命令 | 说明 |
-|------|------|
-| `kweaver ds connect --type mysql --host <host> --port 3306 --database <db> --account <user> --password <pwd>` | 连接数据库 |
-| `kweaver ds list` | 列出数据源 |
-| `kweaver ds get <ds-id>` | 查看数据源详情 |
-| `kweaver ds tables <ds-id>` | 查看数据源的表列表 |
-| `kweaver ds delete <ds-id>` | 删除数据源 |
-
-### 知识网络管理
+### 管理（ontology-manager）
 
 | 命令 | 说明 |
 |------|------|
-| `kweaver kn list [--name <filter>]` | 列出知识网络 |
-| `kweaver kn get <kn-id>` | 查看网络详情 |
-| `kweaver kn export <kn-id>` | 导出网络定义（对象类型、关系类型、属性） |
-| `kweaver kn create --name <name> --ds-id <ds-id> --tables t1,t2 [--relations '<json>']` | 创建知识网络 |
-| `kweaver kn build <kn-id> [--no-wait] [--timeout N]` | 触发全量构建 |
-| `kweaver kn delete <kn-id>` | 删除网络（需确认） |
+| `kweaver kn list [options]` | 列出知识网络 |
+| `kweaver kn get <kn-id> [options]` | 查看网络详情 |
+| `kweaver kn stats <kn-id>` | 查看网络统计 |
+| `kweaver kn export <kn-id>` | 导出网络定义 |
+| `kweaver kn create [options]` | 创建网络 |
+| `kweaver kn update <kn-id> [options]` | 更新网络 |
+| `kweaver kn delete <kn-id> [--yes]` | 删除网络（默认需确认） |
 
-### 查询
+### 查询（ontology-query 只读）
 
 | 命令 | 说明 |
 |------|------|
-| `kweaver query search <kn-id> "<query>" [--max-concepts N]` | 语义搜索 |
-| `kweaver query instances <kn-id> <ot-id> [--condition '<json>'] [--limit N]` | 对象实例查询 |
-| `kweaver query kn-search <kn-id> "<query>" [--only-schema]` | KN schema 搜索 |
-| `kweaver query subgraph <kn-id> --start <ot-id> [--condition '<json>'] --path ot1,ot2` | 子图查询 |
+| `kweaver kn object-type query <kn-id> <ot-id> ['<json>'] [--limit n]` | 对象实例查询 |
+| `kweaver kn object-type properties <kn-id> <ot-id> '<json>'` | 对象属性查询 |
+| `kweaver kn subgraph <kn-id> '<json>'` | 子图查询 |
+| `kweaver kn action-type query <kn-id> <at-id> '<json>'` | 行动信息查询 |
+
+### Action（有副作用）
+
+| 命令 | 说明 |
+|------|------|
+| `kweaver kn action-type execute <kn-id> <at-id> '<json>' [--wait]` | 执行行动 |
+| `kweaver kn action-execution get <kn-id> <execution-id>` | 获取执行状态 |
+| `kweaver kn action-log list/get/cancel ...` | 执行日志 |
+
+### Python 独有：数据源与高层查询
+
+| 命令 | 说明 |
+|------|------|
+| `kweaver ds connect/list/get/tables` | 数据源管理 |
+| `kweaver query search <kn-id> "<query>"` | 语义搜索 |
+| `kweaver query instances <kn-id> <ot-id>` | 对象实例 |
+| `kweaver query subgraph <kn-id> --start-type ... --path ...` | 子图查询 |
 
 ### 通用 API 调用
 
 ```bash
 kweaver call /api/ontology-manager/v1/knowledge-networks
-kweaver call /api/ontology-query/v1/knowledge-networks/<kn-id>/object-types/<ot-id> -X POST -d '<json>'
+kweaver call <path> -X POST -d '<json>' -H "Name: Value" -bd <domain>
 ```
 
 ## CLI 用法详解

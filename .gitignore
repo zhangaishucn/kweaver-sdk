@@ -12,3 +12,10 @@ venv/
 .env
 .env.*
 !.env.example
+.coverage
+test-result/
+node_modules/
+*.tgz
+.DS_Store
+.ralph/
+coverage/

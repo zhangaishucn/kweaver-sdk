@@ -1,0 +1,50 @@
+{
+  "name": "kweaver-sdk",
+  "version": "0.1.4",
+  "description": "KWeaver CLI — TypeScript implementation with Ink TUI.",
+  "type": "module",
+  "bin": {
+    "kweaver": "bin/kweaver.js"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node ./dist/cli.js",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "typescript",
+    "kweaver"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sh00tg0a1/kweaver-caller.git"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "@types/react": "^19.2.14",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "ink": "^6.8.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "marked": "^11.2.0",
+    "react": "^19.2.4"
+  }
+}
