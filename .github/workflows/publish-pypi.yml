@@ -18,7 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # required for PyPI trusted publishing (OIDC)
 
     defaults:
       run:
@@ -51,25 +50,11 @@ jobs:
 
       - name: Verify package version
         run: |
-          PKG_VERSION=$(uv run python -c "import importlib.metadata; print(importlib.metadata.version('kweaver-sdk'))" 2>/dev/null || \
-            python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
+          PKG_VERSION=$(uv run python -c "import importlib.metadata; print(importlib.metadata.version('kweaver-sdk'))")
           echo "Publishing kweaver-sdk==${PKG_VERSION} to PyPI"
 
-      # Option A: Trusted Publishing (OIDC) — no secrets needed.
-      # Configure at https://pypi.org/manage/project/kweaver-sdk/settings/publishing/
-      # Add a trusted publisher for: owner=kweaver-ai, repo=kweaver-sdk,
-      # workflow=publish-pypi.yml, environment=pypi
-      - name: Publish to PyPI (trusted publishing)
-        if: ${{ !inputs.dry_run && vars.PYPI_PUBLISH_METHOD != 'token' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: packages/python/dist/
-          skip-existing: true
-
-      # Option B: API token — set PYPI_API_TOKEN in repo secrets and
-      # set the Actions variable PYPI_PUBLISH_METHOD=token to use this path.
-      - name: Publish to PyPI (API token)
-        if: ${{ !inputs.dry_run && vars.PYPI_PUBLISH_METHOD == 'token' }}
+      - name: Publish to PyPI
+        if: ${{ !inputs.dry_run }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: packages/python/dist/
