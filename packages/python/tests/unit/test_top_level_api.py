@@ -315,6 +315,19 @@ class TestWeaver:
         with pytest.raises(RuntimeError, match="BKN build failed"):
             kweaver.weaver(wait=True, timeout=10)
 
+    def test_weaver_throws_when_no_build_endpoint(self):
+        """Both build endpoints returning 404 must raise, not silently succeed."""
+        def handler(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(404, json={"error": "not found"})
+
+        kweaver.configure("https://mock", token="tok", bkn_id="kn1")
+        kweaver._default_client._http._client = httpx.Client(
+            base_url="https://mock",
+            transport=httpx.MockTransport(handler),
+        )
+        with pytest.raises(RuntimeError, match="No build endpoint available"):
+            kweaver.weaver()
+
     def test_weaver_wait_blocks_until_complete(self):
         call_count = {"n": 0}
 
