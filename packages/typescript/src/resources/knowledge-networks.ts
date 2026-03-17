@@ -95,8 +95,9 @@ export class KnowledgeNetworksResource {
   async build(bknId: string): Promise<void> {
     const { baseUrl, accessToken, businessDomain } = this.ctx.base();
     const headers = {
-      "Content-Type": "application/json",
-      Authorization: accessToken,
+      "content-type": "application/json",
+      authorization: `Bearer ${accessToken}`,
+      token: accessToken,
       "x-business-domain": businessDomain,
     };
     try {
@@ -130,7 +131,8 @@ export class KnowledgeNetworksResource {
   async buildStatus(bknId: string): Promise<BuildStatus> {
     const { baseUrl, accessToken, businessDomain } = this.ctx.base();
     const headers = {
-      Authorization: accessToken,
+      authorization: `Bearer ${accessToken}`,
+      token: accessToken,
       "x-business-domain": businessDomain,
     };
     try {

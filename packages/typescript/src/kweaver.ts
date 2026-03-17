@@ -145,11 +145,11 @@ export async function search(
 }
 
 /**
- * List agents.
+ * List published agents.
  *
  * @example
  * ```typescript
- * const list = await kweaver.agents({ status: "published" });
+ * const list = await kweaver.agents({ keyword: "supply" });
  * list.forEach(a => console.log(a));
  * ```
  */

@@ -141,6 +141,23 @@ test("search accepts bknId override", async () => {
   );
 });
 
+test("search sends correct auth headers (Bearer + token)", async () => {
+  kweaver.configure({ baseUrl: BASE, accessToken: TOKEN, bknId: "bkn-1" });
+  let capturedHeaders: Record<string, string> = {};
+
+  await withFetch(
+    async (_input, init) => {
+      capturedHeaders = init?.headers as Record<string, string>;
+      return new Response(JSON.stringify({ concepts: [], hits_total: 0 }), { status: 200 });
+    },
+    async () => {
+      await kweaver.search("test");
+      assert.equal(capturedHeaders["authorization"], `Bearer ${TOKEN}`, "must include Bearer prefix");
+      assert.equal(capturedHeaders["token"], TOKEN, "must include token header");
+    }
+  );
+});
+
 test("search throws when no bknId configured or provided", async () => {
   kweaver.configure({ baseUrl: BASE, accessToken: TOKEN });
   await assert.rejects(

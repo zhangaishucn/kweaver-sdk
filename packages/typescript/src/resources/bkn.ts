@@ -49,8 +49,9 @@ export class BknResource {
     const { body } = await fetchTextOrThrow(url, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: accessToken,
+        "content-type": "application/json",
+        authorization: `Bearer ${accessToken}`,
+        token: accessToken,
         "x-business-domain": businessDomain,
       },
       body: JSON.stringify({
