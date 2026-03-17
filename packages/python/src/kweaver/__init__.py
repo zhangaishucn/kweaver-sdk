@@ -49,13 +49,13 @@ __all__ = [
     "search",
     "agents",
     "chat",
-    "knowledge_networks",
+    "bkns",
 ]
 
 # ── Global state ──────────────────────────────────────────────────────────────
 
 _default_client: KWeaverClient | None = None
-_default_kn_id: str | None = None
+_default_bkn_id: str | None = None
 _default_agent_id: str | None = None
 
 
@@ -68,7 +68,7 @@ def configure(
     username: str | None = None,
     password: str | None = None,
     config: bool = False,
-    kn_id: str | None = None,
+    bkn_id: str | None = None,
     agent_id: str | None = None,
 ) -> None:
     """Initialize the default KWeaver client.
@@ -81,15 +81,15 @@ def configure(
         username: Username for PasswordAuth (requires password).
         password: Password for PasswordAuth (requires username).
         config: If True, use credentials from the local config file.
-        kn_id: Default knowledge network ID for search() calls.
-        agent_id: Default agent ID for chat() calls.
+        bkn_id: Default BKN ID used by search() and weaver().
+        agent_id: Default agent ID used by chat().
 
     Example::
 
         import kweaver
-        kweaver.configure("https://kweaver.example.com", token="my-token", kn_id="abc123")
+        kweaver.configure("https://kweaver.example.com", token="my-token", bkn_id="abc123")
     """
-    global _default_client, _default_kn_id, _default_agent_id
+    global _default_client, _default_bkn_id, _default_agent_id
 
     if token:
         auth = TokenAuth(token)
@@ -101,7 +101,7 @@ def configure(
         raise ValueError("Provide token=, username+password=, or config=True")
 
     _default_client = KWeaverClient(base_url=url, auth=auth)
-    _default_kn_id = kn_id
+    _default_bkn_id = bkn_id
     _default_agent_id = agent_id
 
 
@@ -118,32 +118,32 @@ def _require_client() -> KWeaverClient:
 def search(
     query: str,
     *,
-    kn_id: str | None = None,
+    bkn_id: str | None = None,
     mode: str = "keyword_vector_retrieval",
     max_concepts: int = 10,
 ) -> SemanticSearchResult:
-    """Semantic search on a knowledge network.
+    """Semantic search on a BKN (Business Knowledge Network).
 
     Args:
         query: Natural-language search query.
-        kn_id: Knowledge network ID. Falls back to the kn_id set in configure().
+        bkn_id: BKN ID. Falls back to the bkn_id set in configure().
         mode: Retrieval mode (default "keyword_vector_retrieval").
         max_concepts: Maximum number of concepts to return.
 
     Example::
 
-        results = kweaver.search("KWeaver 能做什么？")
+        results = kweaver.search("供应链有哪些风险？")
         for concept in results.concepts:
             print(concept.concept_name)
     """
     client = _require_client()
-    resolved_kn_id = kn_id or _default_kn_id
-    if not resolved_kn_id:
+    resolved_bkn_id = bkn_id or _default_bkn_id
+    if not resolved_bkn_id:
         raise ValueError(
-            "No kn_id provided. Pass kn_id= or set it in kweaver.configure()."
+            "No bkn_id provided. Pass bkn_id= or set it in kweaver.configure()."
         )
     return client.query.semantic_search(
-        resolved_kn_id, query, mode=mode, max_concepts=max_concepts
+        resolved_bkn_id, query, mode=mode, max_concepts=max_concepts
     )
 
 
@@ -186,7 +186,7 @@ def chat(
 
     Example::
 
-        reply = kweaver.chat("KWeaver 是什么？")
+        reply = kweaver.chat("分析一下供应链风险")
         print(reply.content)
 
         # Streaming
@@ -207,12 +207,12 @@ def chat(
     )
 
 
-def knowledge_networks(
+def bkns(
     *,
     name: str | None = None,
     limit: int = 50,
 ) -> list[KnowledgeNetwork]:
-    """List knowledge networks.
+    """List BKNs (Business Knowledge Networks).
 
     Args:
         name: Filter by exact name.
@@ -220,8 +220,8 @@ def knowledge_networks(
 
     Example::
 
-        for kn in kweaver.knowledge_networks():
-            print(kn.id, kn.name)
+        for bkn in kweaver.bkns():
+            print(bkn.id, bkn.name)
     """
     client = _require_client()
     return client.knowledge_networks.list(name=name, limit=limit)
@@ -229,24 +229,23 @@ def knowledge_networks(
 
 def weaver(
     *,
-    kn_id: str | None = None,
+    bkn_id: str | None = None,
     wait: bool = False,
     timeout: float = 300,
 ) -> BuildJob:
-    """Trigger a full build (index rebuild) of a knowledge network.
+    """Trigger a full build (index rebuild) of a BKN.
 
     After adding or modifying data sources, object types, or relation types,
-    call this to reindex the knowledge network so changes are searchable.
+    call weaver() to rebuild the BKN index so changes are searchable by agents.
 
-    This corresponds to the BKN full_build_ontology operation, which rebuilds
-    all indexes in OpenSearch and makes the knowledge graph queryable by agents.
+    This is only needed when you make write-side changes (e.g. added a new
+    datasource, updated object types). Read-only usage (search, chat) does
+    not require weaver().
 
     Args:
-        kn_id: Knowledge network ID to build. Falls back to the kn_id set in
-            configure(). Raises ValueError if neither is provided.
+        bkn_id: BKN ID to build. Falls back to the bkn_id set in configure().
         wait: If True, block until the build completes (or raises TimeoutError).
-            If False (default), returns immediately with a BuildJob you can
-            poll manually via job.poll() or job.wait().
+              If False (default), return immediately with a BuildJob.
         timeout: Max seconds to wait when wait=True (default 300).
 
     Returns:
@@ -258,19 +257,15 @@ def weaver(
         job = kweaver.weaver()
 
         # Block until done
-        status = kweaver.weaver(wait=True)
-        print(status.state)  # "completed"
-
-        # After adding a datasource and defining object types:
-        kweaver.weaver(kn_id="abc123", wait=True)
+        kweaver.weaver(wait=True)
     """
     client = _require_client()
-    resolved_kn_id = kn_id or _default_kn_id
-    if not resolved_kn_id:
+    resolved_bkn_id = bkn_id or _default_bkn_id
+    if not resolved_bkn_id:
         raise ValueError(
-            "No kn_id provided. Pass kn_id= or set it in kweaver.configure()."
+            "No bkn_id provided. Pass bkn_id= or set it in kweaver.configure()."
         )
-    job = client.knowledge_networks.build(resolved_kn_id)
+    job = client.knowledge_networks.build(resolved_bkn_id)
     if wait:
         job.wait(timeout=timeout)
     return job

@@ -1,8 +1,6 @@
-"""Tests for the module-level top-level API (kweaver.configure / search / chat / agents)."""
+"""Tests for the module-level top-level API (kweaver.configure / search / chat / agents / weaver)."""
 
 from __future__ import annotations
-
-import json
 
 import httpx
 import pytest
@@ -15,7 +13,6 @@ import kweaver
 # ---------------------------------------------------------------------------
 
 def _make_transport(responses: dict[str, object]):
-    """Return an httpx transport that dispatches by URL path."""
     def handler(req: httpx.Request) -> httpx.Response:
         path = req.url.path
         for pattern, body in responses.items():
@@ -25,10 +22,9 @@ def _make_transport(responses: dict[str, object]):
     return httpx.MockTransport(handler)
 
 
-def _configure(responses: dict[str, object], kn_id: str = "kn1", agent_id: str = "agent1") -> None:
+def _configure(responses: dict[str, object], bkn_id: str = "kn1", agent_id: str = "agent1") -> None:
     transport = _make_transport(responses)
-    # Patch the client after configure by injecting the mock transport
-    kweaver.configure("https://mock", token="test-token", kn_id=kn_id, agent_id=agent_id)
+    kweaver.configure("https://mock", token="test-token", bkn_id=bkn_id, agent_id=agent_id)
     kweaver._default_client._http._client = httpx.Client(
         base_url="https://mock",
         transport=transport,
@@ -41,9 +37,8 @@ def _configure(responses: dict[str, object], kn_id: str = "kn1", agent_id: str =
 
 class TestConfigure:
     def setup_method(self):
-        # Reset global state before each test
         kweaver._default_client = None
-        kweaver._default_kn_id = None
+        kweaver._default_bkn_id = None
         kweaver._default_agent_id = None
 
     def test_token_auth(self):
@@ -55,8 +50,8 @@ class TestConfigure:
         assert kweaver._default_client is not None
 
     def test_sets_defaults(self):
-        kweaver.configure("https://example.com", token="tok", kn_id="kn99", agent_id="ag99")
-        assert kweaver._default_kn_id == "kn99"
+        kweaver.configure("https://example.com", token="tok", bkn_id="kn99", agent_id="ag99")
+        assert kweaver._default_bkn_id == "kn99"
         assert kweaver._default_agent_id == "ag99"
 
     def test_no_auth_raises(self):
@@ -75,10 +70,10 @@ class TestConfigure:
 class TestSearch:
     def setup_method(self):
         kweaver._default_client = None
-        kweaver._default_kn_id = None
+        kweaver._default_bkn_id = None
         kweaver._default_agent_id = None
 
-    def test_search_with_default_kn_id(self):
+    def test_search_with_default_bkn_id(self):
         semantic_response = {
             "concepts": [
                 {
@@ -92,21 +87,21 @@ class TestSearch:
             ],
             "hits_total": 1,
         }
-        _configure({"/semantic-search": semantic_response}, kn_id="kn1")
+        _configure({"/semantic-search": semantic_response}, bkn_id="kn1")
         result = kweaver.search("KWeaver 能做什么？")
         assert result.hits_total == 1
         assert result.concepts[0].concept_name == "KWeaver"
 
-    def test_search_with_explicit_kn_id(self):
+    def test_search_with_explicit_bkn_id(self):
         semantic_response = {"concepts": [], "hits_total": 0}
-        _configure({"/semantic-search": semantic_response}, kn_id="kn1")
-        result = kweaver.search("test", kn_id="kn_other")
+        _configure({"/semantic-search": semantic_response}, bkn_id="kn1")
+        result = kweaver.search("test", bkn_id="kn_other")
         assert result.hits_total == 0
 
-    def test_search_no_kn_id_raises(self):
+    def test_search_no_bkn_id_raises(self):
         kweaver.configure("https://mock", token="tok")
-        with pytest.raises(ValueError, match="No kn_id"):
-            kweaver.search("query without kn_id")
+        with pytest.raises(ValueError, match="No bkn_id"):
+            kweaver.search("query without bkn_id")
 
     def test_search_not_configured_raises(self):
         with pytest.raises(RuntimeError, match="kweaver.configure()"):
@@ -120,7 +115,7 @@ class TestSearch:
 class TestAgents:
     def setup_method(self):
         kweaver._default_client = None
-        kweaver._default_kn_id = None
+        kweaver._default_bkn_id = None
         kweaver._default_agent_id = None
 
     def test_list_agents(self):
@@ -145,7 +140,7 @@ class TestAgents:
 class TestChat:
     def setup_method(self):
         kweaver._default_client = None
-        kweaver._default_kn_id = None
+        kweaver._default_bkn_id = None
         kweaver._default_agent_id = None
 
     def test_chat_with_default_agent_id(self):
@@ -187,28 +182,28 @@ class TestChat:
 
 
 # ---------------------------------------------------------------------------
-# knowledge_networks()
+# bkns()
 # ---------------------------------------------------------------------------
 
-class TestKnowledgeNetworks:
+class TestBkns:
     def setup_method(self):
         kweaver._default_client = None
-        kweaver._default_kn_id = None
+        kweaver._default_bkn_id = None
         kweaver._default_agent_id = None
 
-    def test_list_kns(self):
+    def test_list_bkns(self):
         kn_response = [
-            {"id": "kn1", "name": "供应链知识网络", "tags": []},
-            {"id": "kn2", "name": "人力资源知识网络", "tags": []},
+            {"id": "kn1", "name": "供应链BKN", "tags": []},
+            {"id": "kn2", "name": "人力资源BKN", "tags": []},
         ]
         _configure({"/knowledge-networks": kn_response})
-        result = kweaver.knowledge_networks()
+        result = kweaver.bkns()
         assert len(result) == 2
-        assert result[0].name == "供应链知识网络"
+        assert result[0].name == "供应链BKN"
 
-    def test_kns_not_configured_raises(self):
+    def test_bkns_not_configured_raises(self):
         with pytest.raises(RuntimeError, match="kweaver.configure()"):
-            kweaver.knowledge_networks()
+            kweaver.bkns()
 
 
 # ---------------------------------------------------------------------------
@@ -218,24 +213,24 @@ class TestKnowledgeNetworks:
 class TestWeaver:
     def setup_method(self):
         kweaver._default_client = None
-        kweaver._default_kn_id = None
+        kweaver._default_bkn_id = None
         kweaver._default_agent_id = None
 
     def test_weaver_triggers_build(self):
         build_response = {"state": "running"}
-        _configure({"/full_build_ontology": build_response}, kn_id="kn1")
+        _configure({"/full_build_ontology": build_response}, bkn_id="kn1")
         job = kweaver.weaver()
         assert job.kn_id == "kn1"
 
-    def test_weaver_with_explicit_kn_id(self):
+    def test_weaver_with_explicit_bkn_id(self):
         build_response = {"state": "running"}
         _configure({"/full_build_ontology": build_response})
-        job = kweaver.weaver(kn_id="kn_other")
+        job = kweaver.weaver(bkn_id="kn_other")
         assert job.kn_id == "kn_other"
 
-    def test_weaver_no_kn_id_raises(self):
+    def test_weaver_no_bkn_id_raises(self):
         kweaver.configure("https://mock", token="tok")
-        with pytest.raises(ValueError, match="No kn_id"):
+        with pytest.raises(ValueError, match="No bkn_id"):
             kweaver.weaver()
 
     def test_weaver_not_configured_raises(self):
@@ -255,7 +250,7 @@ class TestWeaver:
                 return httpx.Response(200, json={"state": state})
             return httpx.Response(404, json={})
 
-        kweaver.configure("https://mock", token="tok", kn_id="kn1")
+        kweaver.configure("https://mock", token="tok", bkn_id="kn1")
         kweaver._default_client._http._client = httpx.Client(
             base_url="https://mock",
             transport=httpx.MockTransport(handler),
