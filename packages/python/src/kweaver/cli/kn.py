@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -243,6 +244,85 @@ def object_type_list(kn_id: str) -> None:
     client = make_client()
     ots = client.object_types.list(kn_id)
     pp([ot.model_dump() for ot in ots])
+
+
+@object_type_group.command("get")
+@click.argument("kn_id")
+@click.argument("ot_id")
+@handle_errors
+def object_type_get(kn_id: str, ot_id: str) -> None:
+    """Get object type details."""
+    client = make_client()
+    ot = client.object_types.get(kn_id, ot_id)
+    pp(ot.model_dump())
+
+
+@object_type_group.command("create")
+@click.argument("kn_id")
+@click.option("--name", required=True, help="Object type name.")
+@click.option("--dataview-id", required=True, help="Dataview ID.")
+@click.option("--primary-key", required=True, help="Primary key column name.")
+@click.option("--display-key", required=True, help="Display key column name.")
+@click.option("--property", "properties", multiple=True, help="Property JSON (repeatable).")
+@handle_errors
+def object_type_create(
+    kn_id: str,
+    name: str,
+    dataview_id: str,
+    primary_key: str,
+    display_key: str,
+    properties: tuple[str, ...],
+) -> None:
+    """Create an object type."""
+    from kweaver.types import Property
+
+    parsed_props: list[Property] | None = None
+    if properties:
+        parsed_props = [Property(**json.loads(p)) for p in properties]
+    client = make_client()
+    ot = client.object_types.create(
+        kn_id,
+        name=name,
+        dataview_id=dataview_id,
+        primary_key=primary_key,
+        display_key=display_key,
+        properties=parsed_props,
+    )
+    pp(ot.model_dump())
+
+
+@object_type_group.command("update")
+@click.argument("kn_id")
+@click.argument("ot_id")
+@click.option("--name", default=None, help="New name.")
+@click.option("--display-key", default=None, help="New display key.")
+@handle_errors
+def object_type_update(kn_id: str, ot_id: str, name: str | None, display_key: str | None) -> None:
+    """Update an object type."""
+    kwargs: dict[str, Any] = {}
+    if name is not None:
+        kwargs["name"] = name
+    if display_key is not None:
+        kwargs["display_key"] = display_key
+    if not kwargs:
+        error_exit("No update fields provided. Use --name or --display-key.")
+    client = make_client()
+    ot = client.object_types.update(kn_id, ot_id, **kwargs)
+    pp(ot.model_dump())
+
+
+@object_type_group.command("delete")
+@click.argument("kn_id")
+@click.argument("ot_ids")
+@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation.")
+@handle_errors
+def object_type_delete(kn_id: str, ot_ids: str, yes: bool) -> None:
+    """Delete object type(s)."""
+    if not yes:
+        click.confirm(f"Delete object type(s) {ot_ids}?", abort=True)
+    client = make_client()
+    client.object_types.delete(kn_id, ot_ids)
+    click.echo(f"Deleted {ot_ids}")
 
 
 @kn_group.group("relation-type")
