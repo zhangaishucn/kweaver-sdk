@@ -95,3 +95,60 @@ def test_instance_iter(kweaver_client: KWeaverClient, kn_with_data):
 
     assert len(pages) >= 1
     assert all(isinstance(p.data, list) for p in pages)
+
+
+def test_kn_search(kweaver_client: KWeaverClient, kn_with_data):
+    """kn_search should return schema results."""
+    kn = kn_with_data["kn"]
+    ot = kn_with_data["ot"]
+    result = kweaver_client.query.kn_search(kn.id, ot.name)
+    assert result is not None
+    # Should return at least one of the schema type lists
+    has_results = (
+        (result.object_types and len(result.object_types) > 0)
+        or (result.relation_types and len(result.relation_types) > 0)
+        or (result.action_types and len(result.action_types) > 0)
+    )
+    assert has_results, f"kn_search for '{ot.name}' returned empty results"
+
+
+def test_kn_search_only_schema(kweaver_client: KWeaverClient, kn_with_data):
+    """kn_search with only_schema should return schema without nodes."""
+    kn = kn_with_data["kn"]
+    ot = kn_with_data["ot"]
+    result = kweaver_client.query.kn_search(kn.id, ot.name, only_schema=True)
+    assert result is not None
+
+
+def test_object_type_properties(kweaver_client: KWeaverClient, kn_with_data):
+    """object_type_properties should return property definitions."""
+    kn = kn_with_data["kn"]
+    ot = kn_with_data["ot"]
+    result = kweaver_client.query.object_type_properties(kn.id, ot.id)
+    assert isinstance(result, dict)
+
+
+def test_cli_kn_search(kweaver_client: KWeaverClient, kn_with_data, cli_runner):
+    """CLI query kn-search should work."""
+    from kweaver.cli.main import cli
+    import json
+
+    kn = kn_with_data["kn"]
+    ot = kn_with_data["ot"]
+    result = cli_runner.invoke(cli, ["query", "kn-search", kn.id, ot.name])
+    assert result.exit_code == 0, f"kn-search failed: {result.output}"
+    data = json.loads(result.output)
+    assert isinstance(data, dict)
+
+
+def test_cli_object_type_properties(kweaver_client: KWeaverClient, kn_with_data, cli_runner):
+    """CLI bkn object-type properties should work."""
+    from kweaver.cli.main import cli
+    import json
+
+    kn = kn_with_data["kn"]
+    ot = kn_with_data["ot"]
+    result = cli_runner.invoke(cli, ["bkn", "object-type", "properties", kn.id, ot.id])
+    assert result.exit_code == 0, f"object-type properties failed: {result.output}"
+    data = json.loads(result.output)
+    assert isinstance(data, dict)
