@@ -43,7 +43,8 @@ test("e2e: object-type get returns single OT", { skip: shouldSkipE2e() }, async 
   }
   const { code, stdout } = await runCli(["bkn", "object-type", "get", knId, otId]);
   assert.equal(code, 0);
-  const ot = JSON.parse(stdout) as Record<string, unknown>;
+  const raw = JSON.parse(stdout) as Record<string, unknown>;
+  const ot = Array.isArray(raw.entries) ? (raw.entries[0] as Record<string, unknown>) : raw;
   assert.ok(ot.id !== undefined || ot.name !== undefined);
 });
 
@@ -79,6 +80,7 @@ test("e2e: relation-type get returns single RT", { skip: shouldSkipE2e() }, asyn
   }
   const { code, stdout } = await runCli(["bkn", "relation-type", "get", knId, rtId]);
   assert.equal(code, 0);
-  const rt = JSON.parse(stdout) as Record<string, unknown>;
+  const rawRt = JSON.parse(stdout) as Record<string, unknown>;
+  const rt = Array.isArray(rawRt.entries) ? (rawRt.entries[0] as Record<string, unknown>) : rawRt;
   assert.ok(rt.id !== undefined || rt.name !== undefined);
 });
