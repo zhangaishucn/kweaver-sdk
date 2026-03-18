@@ -98,3 +98,46 @@ def test_instances_iter():
     client = make_client(handler)
     pages = list(client.query.instances_iter("kn_01", "ot_01", limit=1))
     assert len(pages) == 3
+
+
+def test_kn_search(capture: RequestCapture):
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "object_types": [{"id": "ot_01", "name": "产品"}],
+            "relation_types": [],
+            "action_types": [],
+        })
+
+    client = make_client(handler, capture)
+    result = client.query.kn_search("kn_01", "产品")
+    assert result.object_types is not None
+    assert len(result.object_types) == 1
+    body = capture.last_body()
+    assert body["kn_id"] == "kn_01"
+    assert body["query"] == "产品"
+
+
+def test_kn_search_only_schema(capture: RequestCapture):
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "object_types": [],
+            "relation_types": [],
+            "action_types": [],
+        })
+
+    client = make_client(handler, capture)
+    client.query.kn_search("kn_01", "产品", only_schema=True)
+    body = capture.last_body()
+    assert body["only_schema"] is True
+
+
+def test_object_type_properties(capture: RequestCapture):
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "properties": [{"name": "id", "type": "integer"}],
+        })
+
+    client = make_client(handler, capture)
+    result = client.query.object_type_properties("kn_01", "ot_01")
+    assert "properties" in result
+    assert capture.last_headers()["x-http-method-override"] == "GET"
