@@ -10,6 +10,32 @@
 - **数据工程师/开发者** — 编程式数据查询、元数据管理
 - **AI Agent** — 通过工具调用进行数据发现和查询（CLI + JSON 输出）
 
+## 设计原则
+
+SDK 不是 REST 端点的 1:1 翻译。API 按用户/Agent 的操作意图设计，分三个层次：
+
+| 层次 | 面向 | Vega 示例 |
+|------|------|----------|
+| **L3 — 意图方法** | 场景 | `inspect()`, `stats()`, `catalogs.health_report()`, `catalogs.discover(wait=True)` |
+| **L2 — 领域方法** | 实体生命周期 | `catalogs.get()`, `resources.list()` — 比 REST 更智能（名称解析、分页封装） |
+| **L1 — HTTP 原语** | 调试 | `_http.request()`，仅通过 `debug=True` 暴露 |
+
+**与 BKN 保持一致的模式**（详见 BKN 设计文档 §2.2）：
+
+| 模式 | Vega 体现 |
+|------|----------|
+| 异步轮询 | `tasks.wait_discover()` — 指数退避，调用方只关心最终结果 |
+| 复合聚合 | `inspect()` — 并发调用 health + stats + tasks，聚合为一站式报告 |
+| 部分失败容忍 | `inspect()` — 子调用失败不阻塞整体，返回部分结果 |
+| 简化入口 | `catalogs.discover(id, wait=True)` — 一个调用完成"触发发现 + 等待完成 + 返回结果" |
+
+**Agent 友好设计要点**：
+- 方法名语义自解释（`health_report` 而非 `get_aggregated_health_status`）
+- 返回类型是结构化 Pydantic model，Agent 可直接解析字段
+- `list()` 返回值自带分页元信息，Agent 不需要额外请求判断是否有下一页
+- 错误类型层级化（`VegaQueryError` vs `VegaConnectionError`），Agent 可按异常类型决定重试策略
+- CLI `--format json` 输出与 SDK 返回类型结构一致，Agent 用 CLI 和用 SDK 看到的数据形状相同
+
 ## 架构
 
 Vega 能力作为 kweaver-sdk 的扩展模块，复用现有的 Auth、HTTP 和 CLI 基础设施。通过单一 `vega_url` 配置指向 vega-backend（所有 Vega 服务的统一入口）。
@@ -434,7 +460,8 @@ client.vega.catalogs.get("cat-1")
 client.vega.catalogs.health_status(["cat-1", "cat-2"])
 client.vega.catalogs.health_report()   # 组合操作：列出所有 → 批量 health_status → 聚合为 VegaHealthReport
 client.vega.catalogs.test_connection("cat-1")
-client.vega.catalogs.discover("cat-1")
+client.vega.catalogs.discover("cat-1")                     # 触发发现，立即返回 task
+client.vega.catalogs.discover("cat-1", wait=True)           # L3：触发 + 轮询 + 返回已发现的资源列表
 client.vega.catalogs.resources("cat-1", category="table")
 ```
 
@@ -443,7 +470,8 @@ client.vega.catalogs.resources("cat-1", category="table")
 ```python
 client.vega.resources.list(catalog_id="cat-1", category="table", status="active", limit=20, offset=0)
 client.vega.resources.get("res-1")
-client.vega.resources.data("res-1", body={...})  # 查询资源数据
+client.vega.resources.data("res-1", body={...})  # 查询资源数据（完全控制）
+client.vega.resources.preview("res-1", limit=10) # L3：用默认 body 快速预览前 N 行数据
 ```
 
 ### Connector Types
@@ -573,68 +601,85 @@ report = client.vega.inspect(full=False)
 
 ## CLI 层
 
-所有命令位于 `kweaver vega` 下。默认输出 **Markdown** 格式。使用 `--format json` 供程序消费，`--format yaml` 作为备选。所有 list 命令支持 `--limit` 和 `--offset` 分页参数。
+所有命令位于 `kweaver vega` 下。遵循 `sdk-observability-infra.md` §6.5 的 CLI 约定。关键规则：
+
+- **输出格式**：默认 `md`（Markdown 表格），`--format json` 供程序消费
+- **分页**：所有 list 命令支持 `--limit`（默认 20）和 `--offset`（默认 0）
+- **删除确认**：所有 delete/clear 命令需 `--yes, -y` 跳过确认
+- **批量 ID**：逗号分隔的单个位置参数（如 `<ids>`）
+- **JSON body**：`-d`/`--data` 传递原始 JSON body
+
+> 以下命令定义中省略了通用的 `--offset`、`--format` 参数以减少重复。`--limit` 在首次出现时标注默认值。
 
 ### 元数据
 
 ```bash
+kweaver vega catalog                                                               # = list + 健康摘要
 kweaver vega catalog list [--status healthy|degraded|unhealthy|offline|disabled] [--limit 20]
 kweaver vega catalog get <id>
-kweaver vega catalog health [<id...>] [--all]
+kweaver vega catalog health [<ids>] [--all]
 kweaver vega catalog test-connection <id>
 kweaver vega catalog discover <id> [--wait]
 kweaver vega catalog resources <id> [--category table|index|...]
 
+kweaver vega resource                                                              # = list
 kweaver vega resource list [--catalog-id X] [--category table] [--status active] [--limit 20]
 kweaver vega resource get <id>
-kweaver vega resource data <id> -d '<body>'
+kweaver vega resource data <id> -d/--data '<body>'
 
 kweaver vega connector-type list
 kweaver vega connector-type get <type>
 ```
 
-### 数据模型
+### 数据模型（统一 `model` 命令组）
+
+SDK 已用 `VegaModelResource<T>` 泛型基类统一了 6 种模型资源。CLI 同样合并为一个 `model` 命令组，通过 `--type` 区分，减少 18 个命令 → 6 个：
 
 ```bash
-kweaver vega metric-model list [--limit 20]
-kweaver vega metric-model get <id>
-kweaver vega metric-model fields <id>
-
-kweaver vega event-model list [--limit 20]
-kweaver vega event-model get <id>
-kweaver vega event-model levels
-
-kweaver vega trace-model list [--limit 20]
-kweaver vega trace-model get <id>
-kweaver vega trace-model fields <id>
-
-kweaver vega data-view list [--limit 20]
-kweaver vega data-view get <id>
-kweaver vega data-view groups
-
-kweaver vega data-dict list [--limit 20]
-kweaver vega data-dict get <id>
-kweaver vega data-dict items <id>
-
-kweaver vega objective-model list [--limit 20]
-kweaver vega objective-model get <id>
+kweaver vega model                                     # 数据总览：各类型模型数量摘要
+kweaver vega model list [--type metric|event|trace|data-view|data-dict|objective] [--limit 20]
+kweaver vega model get <id>                            # 自动识别类型
+kweaver vega model fields <id>                         # metric/trace 模型的字段信息
+kweaver vega model levels                              # event 模型的级别列表
+kweaver vega model items <id>                          # data-dict 的条目列表
+kweaver vega model groups                              # data-view 的分组列表
 ```
+
+`kweaver vega model`（不带子命令）输出各类型模型数量摘要：
+
+```
+Vega Models
+
+| Type           | Count |
+|----------------|-------|
+| metric-model   | 5     |
+| event-model    | 3     |
+| trace-model    | 2     |
+| data-view      | 8     |
+| data-dict      | 4     |
+| objective-model| 1     |
+| total          | 23    |
+
+Run 'kweaver vega model list --type metric' to see details.
+```
+
+> 不带 `--type` 的 `list` 返回所有类型的混合列表（按类型排序），每条记录带 `type` 字段标识来源。
 
 ### 查询
 
 ```bash
-kweaver vega query dsl [<index>] -d '<body>'
-kweaver vega query dsl-count [<index>] -d '<body>'
+kweaver vega query dsl [<index>] -d/--data '<body>'
+kweaver vega query dsl-count [<index>] -d/--data '<body>'
 kweaver vega query promql '<expr>' --start X --end Y --step 15s
 kweaver vega query promql-instant '<expr>'
 kweaver vega query promql-series --match '<selector>'
-kweaver vega query metric-model <ids> -d '<body>'
-kweaver vega query data-view <ids> -d '<body>'
+kweaver vega query metric-model <ids> -d/--data '<body>'
+kweaver vega query data-view <ids> -d/--data '<body>'
 kweaver vega query trace <trace-model-id> <trace-id>
-kweaver vega query events -d '<body>'
+kweaver vega query events -d/--data '<body>'
 kweaver vega query event <event-model-id> <event-id>
-kweaver vega query execute -d '<request-body>'
-kweaver vega query bench [<index>] -d '<body>' --count 10
+kweaver vega query execute -d/--data '<request-body>'
+kweaver vega query bench [<index>] -d/--data '<body>' --count 10
 ```
 
 注：`query bench` 仅限 CLI — 它是交互式基准测试工具（运行 N 次迭代，报告 p50/p95/p99），不属于 SDK 层抽象。
@@ -642,6 +687,7 @@ kweaver vega query bench [<index>] -d '<body>' --count 10
 ### 可观测性 — 状态
 
 ```bash
+kweaver vega                            # 不带子命令 = inspect（平台总览）
 kweaver vega health
 kweaver vega stats
 kweaver vega inspect [--full]
@@ -827,14 +873,9 @@ packages/typescript/src/
 | 领域 | 能力 | SDK | CLI |
 |------|------|-----|-----|
 | **元数据** | Catalog 列表/详情/健康检查/测试连接/发现 | `vega.catalogs.*` | `vega catalog *` |
-| | Resource 列表/详情/数据查询 | `vega.resources.*` | `vega resource *` |
+| | Resource 列表/详情/数据查询/预览 | `vega.resources.*` | `vega resource *` |
 | | Connector-Type 列表/详情 | `vega.connector_types.*` | `vega connector-type *` |
-| **模型** | Metric-Model 列表/详情/字段 | `vega.metric_models.*` | `vega metric-model *` |
-| | Event-Model 列表/详情/级别 | `vega.event_models.*` | `vega event-model *` |
-| | Trace-Model 列表/详情/字段/调用链 | `vega.trace_models.*` | `vega trace-model *` |
-| | Data-View 列表/详情/分组 | `vega.data_views.*` | `vega data-view *` |
-| | Data-Dict 列表/详情/条目 | `vega.data_dicts.*` | `vega data-dict *` |
-| | Objective-Model 列表/详情 | `vega.objective_models.*` | `vega objective-model *` |
+| **模型** | 6 种模型统一管理（list/get/fields/levels/items/groups） | `vega.metric_models.*` 等 | `vega model *`（统一入口） |
 | **查询** | DSL 搜索/计数/滚动 | `vega.query.dsl*()` | `vega query dsl*` |
 | | PromQL 范围/即时/序列 | `vega.query.promql*()` | `vega query promql*` |
 | | 指标模型数据 | `vega.query.metric_model()` | `vega query metric-model` |
@@ -843,7 +884,7 @@ packages/typescript/src/
 | | 事件查询 | `vega.query.events()` | `vega query events` |
 | | Execute 统一查询 | `vega.query.execute()` | `vega query execute` |
 | **观测-状态** | Catalog 健康巡检 | `vega.catalogs.health_report()` | `vega catalog health --all` |
-| | Discover 任务等待 | `vega.tasks.wait_discover()` | `vega catalog discover --wait` |
+| | Discover（含 wait 模式） | `vega.catalogs.discover(wait=True)` | `vega catalog discover --wait` |
 | | 任务监控 | `vega.tasks.*()` | `vega task list/get` |
 | | 服务健康检查 | `vega.health()` | `vega health` |
 | **观测-诊断** | 查询基准测试 | — | `vega query bench` |
@@ -1004,9 +1045,14 @@ CLI 测试使用 `CliRunner`（现有模式）。关注点：
 
 ```python
 # 模型命令参数化
-@pytest.mark.parametrize("model_name", ["metric-model", "event-model", "trace-model", "data-view", "data-dict", "objective-model"])
-def test_model_list_cli(model_name, cli_runner, mock_vega):
-    result = cli_runner.invoke(["vega", model_name, "list"])
+@pytest.mark.parametrize("model_type", ["metric", "event", "trace", "data-view", "data-dict", "objective"])
+def test_model_list_cli(model_type, cli_runner, mock_vega):
+    result = cli_runner.invoke(["vega", "model", "list", "--type", model_type])
+    assert result.exit_code == 0
+
+def test_model_list_all_cli(cli_runner, mock_vega):
+    """不带 --type 返回所有模型"""
+    result = cli_runner.invoke(["vega", "model", "list"])
     assert result.exit_code == 0
 
 # 格式测试
@@ -1243,7 +1289,7 @@ def vega_lifecycle(vega_client):
     final = vega_client.tasks.wait_discover(task.id, timeout=120)
 
     # 列出已发现的资源
-    resources = vega_client.catalogs.resources(catalog.id, limit=50)
+    resources = vega_client.catalogs.resources(catalog.id, limit=20)
 
     yield {
         "catalog": catalog,
