@@ -1,0 +1,22 @@
+---
+type: knowledge_network
+id: supplychain-hd
+name: HD供应链业务知识网络
+tags: [供应链, 采购, 库存, MRP]
+business_domain: supplychain
+---
+
+# HD供应链业务知识网络
+
+产品供应分析路径：需求预测→产品→BOM→库存→生产计划/采购申请→采购订单→供应商。
+逻辑：
+1. 基于需求预测，结合BOM结构展开物料需求；
+2. 核查成品及物料库存，进行MRP运算生成建议订单；
+3. 根据物料属性（自制/外购），生成生产计划或采购申请；
+4. 采购申请转化为采购订单并由供应商执行，生产计划指导工厂生产；
+5. 最终输出缺口数量及补货建议，支撑供应链决策。
+
+## Network Overview
+
+- **ObjectTypes** (object_types/): product, material, bom, inventory, salesorder, forecast, mps, mrp, pp, pr, po, supplier
+- **RelationTypes** (relation_types/): salesorder2product, product2inventory, product2bom, bom2material, material2inventory, material2pr, pr2po, po2material, po2supplier, mrp2material, pp2mps, pp2mrp, pp2product, demand2pp

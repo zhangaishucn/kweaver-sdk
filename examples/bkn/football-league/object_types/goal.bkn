@@ -1,0 +1,29 @@
+---
+type: object_type
+id: goal
+name: 进球
+tags: [足球, 进球]
+---
+
+## ObjectType: 进球
+
+比赛中的进球记录，关联球员和比赛。
+
+### Data Properties
+
+| Name | Display Name | Type | Description | Mapped Field |
+|------|--------------|------|-------------|--------------|
+| id | ID | integer | 主键ID | id |
+| match_id | 比赛ID | integer | 所属比赛 | match_id |
+| player_id | 进球球员ID | integer | 进球球员 | player_id |
+| minute | 进球时间 | integer | 进球发生的分钟数 | minute |
+| goal_type | 进球类型 | string | 进球类型（normal/penalty/free_kick/own_goal/header） | goal_type |
+| assist_player_id | 助攻球员ID | integer | 助攻球员，可为空 | assist_player_id |
+
+### Logic Properties
+
+### Keys
+
+Primary Keys: id
+Display Key: id
+Incremental Key:

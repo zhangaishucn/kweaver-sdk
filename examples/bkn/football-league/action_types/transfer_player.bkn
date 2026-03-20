@@ -1,0 +1,76 @@
+---
+type: action_type
+id: transfer_player
+name: 球员转会
+tags: [转会, 球员管理]
+enabled: false
+risk_level: high
+requires_approval: true
+---
+
+## ActionType: 球员转会
+
+将球员从当前效力球队转会到新球队，更新球员的所属球队信息。
+
+### Bound Object
+
+| Bound Object | Action Type |
+|--------------|-------------|
+| player | modify |
+
+### Affect Object
+
+| Affect Object |
+|---------------|
+| team |
+
+### Trigger Condition
+
+```yaml
+condition:
+  object_type_id: player
+  field: contract_until
+  operation: <=
+  value: "2026-06-30"
+```
+
+> 当球员合同即将到期（6个月内）时触发转会建议
+
+### Pre-conditions
+
+| Object | Check | Condition | Message |
+|--------|-------|-----------|---------|
+| player | property:status | == active | 球员必须处于活跃状态才能转会 |
+| player | relation:player_belongs_team | exist | 球员必须隶属于某支球队 |
+
+### Scope of Impact
+
+| Object | Impact Description |
+|--------|--------------------|
+| player | 更新球员的所属球队和合同信息 |
+| team | 源球队减少球员，目标球队增加球员 |
+
+### Tool Configuration
+
+| Type | Toolbox ID | Tool ID |
+|------|------------|---------|
+| tool | football_ops | player_transfer |
+
+### Parameter Binding
+
+| Parameter | Type | Source | Binding | Description |
+|-----------|------|--------|---------|-------------|
+| player_id | integer | property | id | 球员ID |
+| player_name | string | property | player_name | 球员姓名 |
+| from_team | integer | property | team_id | 原球队ID |
+| to_team | integer | input | - | 目标球队ID（用户输入） |
+| transfer_fee | decimal | input | - | 转会费（百万欧元） |
+| contract_years | integer | input | - | 新合同年限 |
+
+### Execution Description
+
+1. 确认球员当前状态和合同情况
+2. 验证目标球队满足注册条件
+3. 更新球员所属球队为目标球队
+4. 更新合同到期日期
+5. 记录转会费和转会详情

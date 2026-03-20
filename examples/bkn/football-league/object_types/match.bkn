@@ -1,0 +1,33 @@
+---
+type: object_type
+id: match
+name: 比赛
+tags: [足球, 比赛]
+---
+
+## ObjectType: 比赛
+
+联赛中的单场比赛，包括主客场双方和比分。
+
+### Data Properties
+
+| Name | Display Name | Type | Description | Mapped Field |
+|------|--------------|------|-------------|--------------|
+| id | ID | integer | 主键ID | id |
+| league_id | 联赛ID | integer | 所属联赛 | league_id |
+| round | 轮次 | integer | 联赛第几轮 | round |
+| home_team_id | 主队ID | integer | 主场球队 | home_team_id |
+| away_team_id | 客队ID | integer | 客场球队 | away_team_id |
+| home_score | 主队进球 | integer | 主场球队进球数 | home_score |
+| away_score | 客队进球 | integer | 客场球队进球数 | away_score |
+| match_date | 比赛日期 | datetime | 比赛开球时间 | match_date |
+| venue | 比赛场地 | string | 比赛举办场地 | venue |
+| status | 比赛状态 | string | 状态（scheduled/live/finished/postponed） | status |
+
+### Logic Properties
+
+### Keys
+
+Primary Keys: id
+Display Key: id
+Incremental Key:

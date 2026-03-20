@@ -84,3 +84,30 @@ def test_custom_headers_injected():
     client = _make_client(handler)
     client.get("/api/test", headers={"X-Custom": "value"})
     assert captured["headers"].get("x-custom") == "value"
+
+
+def test_post_multipart_returns_status_and_bytes():
+    """post_multipart does not raise on 4xx; returns raw body."""
+    def handler(req):
+        assert req.method == "POST"
+        return httpx.Response(201, content=b'{"kn_id":"x"}')
+
+    client = _make_client(handler)
+    status, body = client.post_multipart(
+        "/api/bkn-backend/v1/bkns",
+        files={"file": ("bkn.tar", b"tar", "application/octet-stream")},
+        params={"branch": "main"},
+        timeout=10.0,
+    )
+    assert status == 201
+    assert body == b'{"kn_id":"x"}'
+
+
+def test_get_bytes_returns_status_and_body():
+    def handler(req):
+        return httpx.Response(200, content=b"\x00\x01")
+
+    client = _make_client(handler)
+    status, body = client.get_bytes("/api/raw", params={"a": "1"})
+    assert status == 200
+    assert body == b"\x00\x01"

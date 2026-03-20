@@ -1,0 +1,32 @@
+---
+type: object_type
+id: team
+name: 球队
+tags: [足球, 球队]
+---
+
+## ObjectType: 球队
+
+职业足球俱乐部，参加各级联赛和杯赛。
+
+### Data Properties
+
+| Name | Display Name | Type | Description | Mapped Field |
+|------|--------------|------|-------------|--------------|
+| id | ID | integer | 主键ID | id |
+| team_name | 球队名称 | string | 俱乐部官方名称 | team_name |
+| short_name | 简称 | string | 球队简称 | short_name |
+| league_id | 所属联赛ID | integer | 当前所属联赛 | league_id |
+| city | 所在城市 | string | 俱乐部所在城市 | city |
+| stadium | 主场球场 | string | 主场球场名称 | stadium |
+| coach | 主教练 | string | 当前主教练姓名 | coach |
+| founded_year | 成立年份 | integer | 俱乐部成立年份 | founded_year |
+| market_value | 球队身价 | decimal | 球队总市场价值（百万欧元） | market_value |
+
+### Logic Properties
+
+### Keys
+
+Primary Keys: id
+Display Key: team_name
+Incremental Key:

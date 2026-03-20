@@ -1309,6 +1309,65 @@ def test_object_type_properties(runner):
         client.query.object_type_properties.assert_called_once_with("kn1", "ot1", body=None)
 
 
+# ---------------------------------------------------------------------------
+# BKN push / pull
+# ---------------------------------------------------------------------------
+
+
+class TestBknPushPull:
+    @patch("kweaver.cli.kn.make_client")
+    def test_push_validates_and_uploads(self, mock_make, runner, tmp_path):
+        """push validates BKN, generates checksum, packs tar, and uploads."""
+        # Create a minimal BKN directory
+        (tmp_path / "network.bkn").write_text(
+            "---\ntype: knowledge_network\nid: test\nname: Test\n---\n# Test\n"
+        )
+        ot_dir = tmp_path / "object_types"
+        ot_dir.mkdir()
+        (ot_dir / "item.bkn").write_text(
+            "---\ntype: object_type\nid: item\nname: Item\n---\n# Item\n"
+        )
+
+        client = _mock_client()
+        client._http.post_multipart = MagicMock(
+            return_value=(200, b'{"kn_id": "test"}'),
+        )
+        mock_make.return_value = client
+
+        result = runner.invoke(cli, ["bkn", "push", str(tmp_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "Validated" in result.output or "kn_id" in result.output
+        client._http.post_multipart.assert_called_once()
+
+    def test_push_not_a_directory(self, runner):
+        result = runner.invoke(cli, ["bkn", "push", "/nonexistent/dir"])
+        assert result.exit_code != 0
+
+    @patch("kweaver.cli.kn.make_client")
+    def test_pull_downloads_and_extracts(self, mock_make, runner, tmp_path):
+        """pull downloads tar and extracts to directory."""
+        import tarfile, io
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tf:
+            data = b"---\ntype: knowledge_network\nid: t\nname: T\n---\n"
+            info = tarfile.TarInfo(name="network.bkn")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        tar_bytes = buf.getvalue()
+
+        client = _mock_client()
+        client._http.get_bytes = MagicMock(return_value=(200, tar_bytes))
+        mock_make.return_value = client
+
+        out_dir = tmp_path / "output"
+        result = runner.invoke(cli, ["bkn", "pull", "test_kn", str(out_dir)])
+
+        assert result.exit_code == 0, result.output
+        assert (out_dir / "network.bkn").exists()
+
+
 def test_context_loader_config_set_no_active_platform(runner):
     with patch("kweaver.cli.context_loader.PlatformStore") as MockStore:
         store = MockStore.return_value

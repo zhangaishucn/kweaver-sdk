@@ -1,0 +1,20 @@
+---
+type: concept_group
+id: football
+name: 足球联赛
+tags: [足球]
+---
+
+## ConceptGroup: 足球联赛
+
+足球联赛相关的核心概念分组，涵盖联赛组织、球队、球员及比赛数据。
+
+### Object Types
+
+| ID | Name | Description |
+|----|------|-------------|
+| league | 联赛 | 足球联赛赛事，如英超、西甲、中超等 |
+| team | 球队 | 职业足球俱乐部 |
+| player | 球员 | 职业足球运动员 |
+| match | 比赛 | 联赛中的单场比赛 |
+| goal | 进球 | 比赛中的进球记录 |

@@ -1,0 +1,22 @@
+---
+type: relation_type
+id: team_in_league
+name: 球队参加联赛
+tags: [联赛, 球队]
+---
+
+## RelationType: 球队参加联赛
+
+球队与所属联赛之间的参赛关系。
+
+### Endpoint
+
+| Source | Target | Type |
+|--------|--------|------|
+| team | league | direct |
+
+### Mapping Rules
+
+| Source Property | Target Property |
+|-----------------|-----------------|
+| league_id | id |

@@ -1,0 +1,47 @@
+---
+type: action_type
+id: suspend_player
+name: 球员停赛处罚
+tags: [纪律, 球员管理]
+enabled: false
+risk_level: medium
+requires_approval: true
+---
+
+## ActionType: 球员停赛处罚
+
+对违规球员执行停赛处罚，更新球员状态为 suspended。
+
+### Bound Object
+
+| Bound Object | Action Type |
+|--------------|-------------|
+| player | modify |
+
+### Pre-conditions
+
+| Object | Check | Condition | Message |
+|--------|-------|-----------|---------|
+| player | property:status | == active | 只能对活跃球员执行停赛 |
+
+### Tool Configuration
+
+| Type | Toolbox ID | Tool ID |
+|------|------------|---------|
+| tool | football_ops | player_suspend |
+
+### Parameter Binding
+
+| Parameter | Type | Source | Binding | Description |
+|-----------|------|--------|---------|-------------|
+| player_id | integer | property | id | 球员ID |
+| player_name | string | property | player_name | 球员姓名 |
+| reason | string | input | - | 停赛原因 |
+| suspend_matches | integer | input | - | 停赛场次 |
+
+### Execution Description
+
+1. 确认球员当前处于活跃状态
+2. 将球员状态更新为 suspended
+3. 记录停赛原因和场次
+4. 通知所属球队

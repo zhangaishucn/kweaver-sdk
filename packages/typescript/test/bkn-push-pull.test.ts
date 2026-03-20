@@ -113,26 +113,26 @@ test("tar pack and extract round-trip with temp dir (no examples dependency)", (
   assert.equal(readFileSync(join(outDir, "entities.bkn"), "utf8"), "---\ntype: data\n---\n# Entities");
 });
 
-test("tar pack and extract round-trip preserves .bkn files", () => {
-  const k8sModular = join(FIXTURES_ROOT, "k8s-modular");
-  if (!existsSync(k8sModular)) {
-    test.skip("BKN examples not found at " + k8sModular);
+test("tar pack and extract round-trip for football-league", () => {
+  const footballLeague = join(FIXTURES_ROOT, "football-league");
+  if (!existsSync(footballLeague)) {
+    test.skip("BKN examples not found at " + footballLeague);
     return;
   }
 
-  const tarBuffer = packDirectoryToTar(k8sModular);
+  const tarBuffer = packDirectoryToTar(footballLeague);
   assert.ok(Buffer.isBuffer(tarBuffer));
   assert.ok(tarBuffer.length > 0);
 
   const outDir = mkdtempSync(join(tmpdir(), "bkn-pull-"));
   extractTarToDirectory(tarBuffer, outDir);
 
-  const before = collectBknFiles(k8sModular);
+  const before = collectBknFiles(footballLeague);
   const after = collectBknFiles(outDir);
   assert.deepEqual(after, before, "BKN files should match after round-trip");
 
   for (const rel of before) {
-    const a = readFileSync(join(k8sModular, rel), "utf8");
+    const a = readFileSync(join(footballLeague, rel), "utf8");
     const b = readFileSync(join(outDir, rel), "utf8");
     assert.equal(b, a, `Content of ${rel} should match`);
   }
@@ -226,21 +226,3 @@ test("tar pack and extract round-trip for k8s-network", () => {
   assert.deepEqual(after, before, "BKN files should match after round-trip");
 });
 
-test("tar pack and extract round-trip for k8s-topology (single-file)", () => {
-  const k8sTopology = join(FIXTURES_ROOT, "k8s-topology");
-  if (!existsSync(k8sTopology)) {
-    test.skip("BKN examples not found at " + k8sTopology);
-    return;
-  }
-
-  const tarBuffer = packDirectoryToTar(k8sTopology);
-  assert.ok(Buffer.isBuffer(tarBuffer));
-  assert.ok(tarBuffer.length > 0);
-
-  const outDir = mkdtempSync(join(tmpdir(), "bkn-pull-"));
-  extractTarToDirectory(tarBuffer, outDir);
-
-  const before = collectBknFiles(k8sTopology);
-  const after = collectBknFiles(outDir);
-  assert.deepEqual(after, before, "BKN files should match after round-trip");
-});

@@ -1,0 +1,30 @@
+---
+type: object_type
+id: league
+name: 联赛
+tags: [足球, 联赛]
+---
+
+## ObjectType: 联赛
+
+足球联赛赛事，如英超、西甲、中超等顶级职业联赛。
+
+### Data Properties
+
+| Name | Display Name | Type | Description | Mapped Field |
+|------|--------------|------|-------------|--------------|
+| id | ID | integer | 主键ID | id |
+| league_name | 联赛名称 | string | 联赛官方名称 | league_name |
+| country | 所属国家 | string | 联赛所属国家或地区 | country |
+| level | 联赛级别 | integer | 联赛在该国联赛体系中的级别 | level |
+| season | 赛季 | string | 当前赛季标识，如 2025-2026 | season |
+| total_teams | 参赛球队数 | integer | 联赛参赛球队总数 | total_teams |
+| founded_year | 创立年份 | integer | 联赛创立年份 | founded_year |
+
+### Logic Properties
+
+### Keys
+
+Primary Keys: id
+Display Key: league_name
+Incremental Key:

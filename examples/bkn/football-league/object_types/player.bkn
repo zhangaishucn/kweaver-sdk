@@ -1,0 +1,33 @@
+---
+type: object_type
+id: player
+name: 球员
+tags: [足球, 球员]
+---
+
+## ObjectType: 球员
+
+职业足球运动员，隶属于某支俱乐部球队。
+
+### Data Properties
+
+| Name | Display Name | Type | Description | Mapped Field |
+|------|--------------|------|-------------|--------------|
+| id | ID | integer | 主键ID | id |
+| player_name | 球员姓名 | string | 球员全名 | player_name |
+| nationality | 国籍 | string | 球员国籍 | nationality |
+| position | 位置 | string | 场上位置（GK/CB/LB/RB/CM/AM/LW/RW/ST） | position |
+| jersey_number | 球衣号码 | integer | 当前球衣号码 | jersey_number |
+| team_id | 所属球队ID | integer | 当前效力球队 | team_id |
+| age | 年龄 | integer | 球员年龄 | age |
+| market_value | 身价 | decimal | 球员市场价值（百万欧元） | market_value |
+| contract_until | 合同到期 | date | 合同到期日期 | contract_until |
+| status | 状态 | string | 球员状态（active/injured/suspended/loaned） | status |
+
+### Logic Properties
+
+### Keys
+
+Primary Keys: id
+Display Key: player_name
+Incremental Key:

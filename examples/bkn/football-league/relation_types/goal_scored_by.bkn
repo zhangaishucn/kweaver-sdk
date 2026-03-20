@@ -1,0 +1,22 @@
+---
+type: relation_type
+id: goal_scored_by
+name: 进球由球员打入
+tags: [进球, 球员]
+---
+
+## RelationType: 进球由球员打入
+
+进球记录与进球球员的关系。
+
+### Endpoint
+
+| Source | Target | Type |
+|--------|--------|------|
+| goal | player | direct |
+
+### Mapping Rules
+
+| Source Property | Target Property |
+|-----------------|-----------------|
+| player_id | id |

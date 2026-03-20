@@ -1,0 +1,6 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/packages/python/.venv/bin/python",
+  "python.terminal.activateEnvInCurrentTerminal": true,
+  "python.analysis.extraPaths": ["${workspaceFolder}/packages/python/src"],
+  "basedpyright.analysis.extraPaths": ["${workspaceFolder}/packages/python/src"]
+}

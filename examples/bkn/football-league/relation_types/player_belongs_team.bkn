@@ -1,0 +1,22 @@
+---
+type: relation_type
+id: player_belongs_team
+name: 球员效力球队
+tags: [球员, 球队]
+---
+
+## RelationType: 球员效力球队
+
+球员当前效力的俱乐部球队。
+
+### Endpoint
+
+| Source | Target | Type |
+|--------|--------|------|
+| player | team | direct |
+
+### Mapping Rules
+
+| Source Property | Target Property |
+|-----------------|-----------------|
+| team_id | id |

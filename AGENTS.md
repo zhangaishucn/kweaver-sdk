@@ -13,6 +13,13 @@
 - **TypeScript SDK**: `@kweaver-ai/bkn`（npm 包）
 - **Python SDK**: `pip install kweaver-bkn`
 
+### 两个 SDK 的边界（重要）
+
+| 仓库 / 包 | 职责 |
+|-----------|------|
+| **bkn-specification**（`@kweaver-ai/bkn` / `kweaver-bkn`） | BKN **格式**：解析、校验、目录加载、`CHECKSUM`、`pack_to_tar` 等到**磁盘**的 tar 等。**不要**在此实现 KWeaver 平台 HTTP（上传/下载 BKN）。 |
+| **kweaver-sdk**（`kweaver-sdk` npm / `kweaver-sdk` PyPI） | **平台客户端**：OAuth、KN/BKN 相关 REST、CLI。`bkn push` / `bkn pull` 等平台交互只放在本仓库；需要时用 **BKN SDK** 做本地校验/校验和，用本仓库的 HTTP 与系统 `tar` 完成打包上传。 |
+
 ### BKN 规范
 
 - 当前权威版本：**v2.0.0**，以 <https://github.com/kweaver-ai/bkn-specification/blob/main/docs/SPECIFICATION.md> 为准
@@ -49,10 +56,6 @@
 - [ ] 命名、目录、风格是否与现有保持一致？
 - [ ] 是否补齐了必要的测试/文档/示例？
 
-## 测试（Tests）
-
-> 完整规范见 [rules/TESTING.zh.md](rules/TESTING.zh.md)
-
 ### 测试分层
 
 | 层级 | 缩写 | 定义 | 外部依赖 |
@@ -61,6 +64,18 @@
 | 端到端测试 | E2E | 验证与真实服务的交互 | 运行中的服务 |
 
 **关键约束**：`make test` 仅代表 UT，无外部依赖即可通过；E2E 由 `test-e2e` 单独入口执行。
+
+### Python 解释器（Cursor / VS Code）
+
+- 仓库已配置 **默认解释器**：`${workspaceFolder}/packages/python/.venv/bin/python`（见 `.vscode/settings.json`）。
+- **首次**在 `packages/python` 下创建 venv 并安装依赖（否则路径不存在、分析器仍报错）：
+
+```bash
+cd packages/python && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+```
+
+- **Windows**：若未使用 WSL，请在命令面板选择解释器，或把 `.vscode/settings.json` 里的路径改为 `packages/python/.venv/Scripts/python.exe`。
+- **Pyright / BasedPyright**：根目录 `pyrightconfig.json` 将 `venv` 指向 `packages/python/.venv`，与上文一致。
 
 ### 目录与入口
 

@@ -178,6 +178,49 @@ class HttpClient:
     def post(self, path: str, *, json: Any = None, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None, timeout: float | None = None) -> Any:
         return self.request("POST", path, json=json, params=params, headers=headers, retry=False, timeout=timeout)
 
+    def post_multipart(
+        self,
+        path: str,
+        *,
+        files: dict[str, tuple[str, bytes, str]],
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> tuple[int, bytes]:
+        """POST ``multipart/form-data``; returns ``(status_code, body_bytes)`` without raising on 4xx/5xx."""
+        merged_headers = self._build_headers()
+        self._log("POST", path, body="<multipart>")
+        kw: dict[str, Any] = {"headers": merged_headers, "files": files}
+        if params is not None:
+            kw["params"] = params
+        if timeout is not None:
+            kw["timeout"] = timeout
+        try:
+            resp = self._client.post(path, **kw)
+        except httpx.HTTPError as exc:
+            raise NetworkError(str(exc), status_code=None, error_code=None) from exc
+        return resp.status_code, resp.content
+
+    def get_bytes(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> tuple[int, bytes]:
+        """GET raw response body; returns ``(status_code, body_bytes)`` without raising on 4xx/5xx."""
+        merged_headers = self._build_headers()
+        self._log("GET", path)
+        kw: dict[str, Any] = {"headers": merged_headers}
+        if params is not None:
+            kw["params"] = params
+        if timeout is not None:
+            kw["timeout"] = timeout
+        try:
+            resp = self._client.get(path, **kw)
+        except httpx.HTTPError as exc:
+            raise NetworkError(str(exc), status_code=None, error_code=None) from exc
+        return resp.status_code, resp.content
+
     def put(self, path: str, *, json: Any = None, headers: dict[str, str] | None = None) -> Any:
         return self.request("PUT", path, json=json, headers=headers)
 

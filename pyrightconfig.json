@@ -1,0 +1,7 @@
+{
+  "include": ["packages/python/src"],
+  "exclude": ["**/node_modules", "**/__pycache__", "**/.pytest_cache"],
+  "venvPath": "packages/python",
+  "venv": ".venv",
+  "pythonVersion": "3.10"
+}

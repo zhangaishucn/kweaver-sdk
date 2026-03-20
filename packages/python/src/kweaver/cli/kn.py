@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import click
@@ -227,6 +231,100 @@ def create_kn(
         "kn_id": kn.id, "kn_name": kn.name,
         "object_types": ot_results, "status": status_str,
     })
+
+
+# ── push / pull (BKN tar import/export) ────────────────────────────────────────
+
+
+def _pack_bkn_directory_to_tar_bytes(abs_dir: Path) -> bytes:
+    """Pack directory to tar bytes (no ``./`` prefix), aligned with TS ``kweaver bkn push``."""
+    entries = sorted(os.listdir(abs_dir))
+    if not entries:
+        raise ValueError("BKN directory is empty")
+    env = os.environ.copy()
+    if sys.platform == "darwin":
+        env["COPYFILE_DISABLE"] = "1"
+    proc = subprocess.run(
+        ["tar", "cf", "-", "-C", str(abs_dir), *entries],
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or b"").decode(errors="replace").strip()
+        raise RuntimeError(f"tar pack failed (exit {proc.returncode}): {err}")
+    return proc.stdout
+
+
+@kn_group.command("push")
+@click.argument("directory")
+@click.option("--branch", default="main", help="Branch name (default: main).")
+@handle_errors
+def push_bkn(directory: str, branch: str) -> None:
+    """Validate, generate checksum, pack, and upload a BKN directory.
+
+    Uses **kweaver-bkn** for validation/checksum only; tar is produced via system ``tar``
+    (same layout as the TypeScript CLI) so the platform can find ``network.bkn`` at top level.
+    """
+    from bkn import generate_checksum_file, load_network
+
+    dir_path = Path(directory).resolve()
+    if not dir_path.is_dir():
+        error_exit(f"Not a directory: {directory}")
+
+    network = load_network(str(dir_path))
+    n_obj = len(network.all_objects)
+    n_rel = len(network.all_relations)
+    n_act = len(network.all_actions)
+    click.echo(
+        f"Validated: {n_obj} object types, {n_rel} relation types, {n_act} action types",
+        err=True,
+    )
+
+    generate_checksum_file(str(dir_path))
+    click.echo("Checksum generated", err=True)
+
+    tar_data = _pack_bkn_directory_to_tar_bytes(dir_path)
+
+    client = make_client()
+    status, body = client._http.post_multipart(
+        "api/bkn-backend/v1/bkns",
+        files={"file": ("bkn.tar", tar_data, "application/octet-stream")},
+        params={"branch": branch},
+        timeout=60.0,
+    )
+    if status >= 400:
+        error_exit(f"HTTP {status}: {body.decode(errors='replace')}")
+    pp(json.loads(body.decode()))
+
+
+@kn_group.command("pull")
+@click.argument("kn_id")
+@click.argument("directory", default="")
+@click.option("--branch", default="main", help="Branch name (default: main).")
+@handle_errors
+def pull_bkn(kn_id: str, directory: str, branch: str) -> None:
+    """Download a BKN tar and extract to a local directory."""
+    import tarfile, io
+
+    out_dir = Path(directory or kn_id).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    client = make_client()
+    status, body = client._http.get_bytes(
+        f"api/bkn-backend/v1/bkns/{kn_id}",
+        params={"branch": branch},
+        timeout=60.0,
+    )
+    if status >= 400:
+        error_exit(f"HTTP {status}: {body.decode(errors='replace')}")
+
+    with tarfile.open(fileobj=io.BytesIO(body), mode="r:*") as tf:
+        if sys.version_info >= (3, 12):
+            tf.extractall(path=str(out_dir), filter="data")
+        else:
+            tf.extractall(path=str(out_dir))
+    click.echo(f"Extracted to {out_dir}")
 
 
 # ── object-type, relation-type, action-type (schema list) ──────────────────────

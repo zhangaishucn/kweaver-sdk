@@ -1,0 +1,18 @@
+---
+type: knowledge_network
+id: football_league
+name: 足球联赛知识网络
+tags: [足球, 联赛, 体育]
+business_domain: sports
+---
+
+# 足球联赛知识网络
+
+建模足球联赛的核心实体与关系，涵盖联赛、球队、球员、比赛、进球等概念，支持赛事管理、球员转会、战术分析等场景。
+
+## Network Overview
+
+- **ObjectTypes** (object_types/): league, team, player, match, goal
+- **RelationTypes** (relation_types/): team_in_league, player_belongs_team, match_home_team, match_away_team, goal_scored_by
+- **ActionTypes** (action_types/): transfer_player, suspend_player
+- **ConceptGroups** (concept_groups/): football

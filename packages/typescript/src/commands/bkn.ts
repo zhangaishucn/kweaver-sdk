@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { execSync, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { loadNetwork, allObjects, allRelations, allActions, generateChecksum } from "@kweaver-ai/bkn";
 import { ensureValidToken, formatHttpError } from "../auth/oauth.js";
 import {
   listKnowledgeNetworks,
@@ -2589,6 +2590,27 @@ async function runKnPushCommand(args: string[]): Promise<number> {
       return 1;
     }
     throw err;
+  }
+
+  try {
+    const network = await loadNetwork(absDir);
+    const objs = allObjects(network);
+    const rels = allRelations(network);
+    const acts = allActions(network);
+    console.error(
+      `Validated: ${objs.length} object types, ${rels.length} relation types, ${acts.length} action types`
+    );
+  } catch (error) {
+    console.error(`BKN validation failed: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
+
+  try {
+    await generateChecksum(absDir);
+    console.error("Checksum generated");
+  } catch (error) {
+    console.error(`Checksum generation failed: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
   }
 
   try {
