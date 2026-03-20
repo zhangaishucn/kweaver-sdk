@@ -7,7 +7,7 @@
 ---
 
 ## 1. 错误响应格式不统一
-**涉及模块**: ontology-manager, data-connection, agent-retrieval(MCP), 全平台
+**涉及模块**: `BKN` `Vega` `Decision Agent` `ISF` `Context Loader`（全平台）
 
 ### 现象
 
@@ -74,7 +74,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
 ---
 
 ## 2. List 响应信封不统一
-**涉及模块**: ontology-manager, ontology-query, data-connection, mdl-data-model, agent-factory, agent-app, 全平台
+**涉及模块**: `BKN` `Vega` `Decision Agent` `ISF`（全平台）
 
 ### 现象
 
@@ -145,7 +145,7 @@ import sys, json; d=json.load(sys.stdin); print('keys:', list(d.keys()) if isins
 ---
 
 ## 3. Create 接口不支持幂等
-**涉及模块**: ontology-manager, data-connection, mdl-data-model
+**涉及模块**: `BKN` `ISF` `Vega`
 
 ### 现象
 
@@ -240,7 +240,7 @@ SDK 直接 `get(existing_id)` 即可，不需要 list + 遍历。
 ---
 
 ## 4. Object Type 创建的 data_properties 隐式必填
-**涉及模块**: ontology-manager (create OT + build engine)
+**涉及模块**: `BKN`
 
 ### 现象
 
@@ -324,7 +324,7 @@ Create OT 时，如果 `data_properties` 未传或缺少 `mapped_field`：
 ---
 
 ## 5. OAuth2 标准流程签发的 Token 被 API 网关拒绝
-**涉及模块**: API Gateway (dip-hub), Ory Hydra 集成层
+**涉及模块**: `ISF`（API Gateway / dip-hub / Ory Hydra 集成层）
 
 ### 现象
 
@@ -416,7 +416,7 @@ API 网关的 token 校验应走标准 Ory token introspection（`POST /oauth2/i
 ---
 
 ## 6. agent-factory 的 Content-Type 处理 Bug
-**涉及模块**: agent-factory
+**涉及模块**: `Decision Agent`（agent-factory）
 
 ### 现象
 
