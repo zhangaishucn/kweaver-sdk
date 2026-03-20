@@ -23,9 +23,16 @@ test("e2e: bkn build --no-wait returns immediately", { skip: !shouldRunDestructi
   if (!knId) { test.skip("no KN with object types found"); return; }
 
   const { code, stdout, stderr } = await runCli(["bkn", "build", knId, "--no-wait"]);
-  if (code !== 0 && (stderr.includes("NoneConceptType") || stderr.includes("JobConceptConfig"))) {
-    test.skip("BKN has no buildable concepts");
-    return;
+  if (code !== 0) {
+    const msg = stderr + stdout;
+    if (msg.includes("NoneConceptType") || msg.includes("JobConceptConfig")) {
+      test.skip("BKN has no buildable concepts");
+      return;
+    }
+    if (msg.includes("running") || msg.includes("conflict") || msg.includes("already")) {
+      test.skip("Another build is already running on this KN");
+      return;
+    }
   }
   assert.equal(code, 0, `build failed: ${stderr}`);
 });
