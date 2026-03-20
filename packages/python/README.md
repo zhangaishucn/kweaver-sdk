@@ -1,22 +1,21 @@
 # KWeaver Python SDK
 
-A clean Python interface for accessing KWeaver BKN (Business Knowledge Network) and Decision Agents.
+Python SDK + CLI for the KWeaver platform — BKN (Business Knowledge Network), Vega data management, and Decision Agents.
 
 [中文文档](README.zh.md)
 
 ## Installation
 
 ```bash
-pip install kweaver-sdk
+pip install kweaver-sdk          # SDK only
+pip install kweaver-sdk[cli]     # SDK + CLI
 ```
 
 Requires **Python >= 3.10**.
 
 ## Quick Start
 
-### Scenario 1: Read-only queries (connect to an existing BKN)
-
-Use this mode when you only need to search or chat with an agent against an existing BKN. **No need to call `weaver()`.**
+### Search & Chat (simplest path)
 
 ```python
 import kweaver
@@ -28,7 +27,7 @@ kweaver.configure(
     agent_id="supply-chain-agent-id",
 )
 
-# Semantic search over the BKN
+# Semantic search
 results = kweaver.search("What are the key risks in the supply chain?")
 for concept in results.concepts:
     print(concept.concept_name, concept.rerank_score)
@@ -37,165 +36,160 @@ for concept in results.concepts:
 reply = kweaver.chat("Analyse the inventory risks for this year")
 print(reply.content)
 
-# Streaming output
+# Streaming
 for chunk in kweaver.chat("Generate a risk report", stream=True):
     print(chunk.delta, end="", flush=True)
 ```
 
----
-
-### Scenario 2: Write data then rebuild the index
-
-After connecting new datasources or adding object/relation types, call `weaver()` to rebuild the BKN index so changes become searchable by agents.
+### Client API (full control)
 
 ```python
-import kweaver
-from kweaver import KWeaverClient, TokenAuth
-
-kweaver.configure(
-    url="https://kweaver.example.com",
-    token="my-token",
-    bkn_id="supply-chain-bkn-id",
-)
-
-# Use the low-level client for write operations
-client = kweaver._default_client
-client.datasources.create(name="erp_db", type="mysql", ...)
-client.object_types.create(bkn_id="supply-chain-bkn-id", ...)
-
-# Trigger a full BKN build after writes (default timeout: 300s)
-kweaver.weaver(wait=True)
-print("BKN build complete — ready to search")
-
-# Now search the newly indexed data
-results = kweaver.search("Which suppliers are in the newly imported ERP data?")
-```
-
-Async (non-blocking) build:
-
-```python
-job = kweaver.weaver()          # Returns a BuildJob immediately
-status = job.poll()             # Poll manually
-print(status.state)             # "running" / "completed" / "failed"
-
-# Or wait later
-status = job.wait(timeout=600)
-```
-
----
-
-### Scenario 3: Manage multiple BKNs
-
-When operating on multiple BKNs simultaneously, pass `bkn_id` explicitly to each call:
-
-```python
-import kweaver
-
-kweaver.configure(
-    url="https://kweaver.example.com",
-    token="my-token",
-)
-
-# List all BKNs
-for bkn in kweaver.bkns():
-    print(bkn.id, bkn.name)
-
-# Search different BKNs
-results_sc = kweaver.search("inventory alert", bkn_id="supply-chain-bkn-id")
-results_hr = kweaver.search("employee turnover", bkn_id="hr-bkn-id")
-
-# Rebuild specific BKNs
-kweaver.weaver(bkn_id="supply-chain-bkn-id", wait=True)
-kweaver.weaver(bkn_id="hr-bkn-id", wait=True)
-```
-
----
-
-### Scenario 4: Browse agents
-
-```python
-import kweaver
-
-kweaver.configure(url="https://kweaver.example.com", token="my-token")
-
-# List all published agents
-for agent in kweaver.agents(status="published"):
-    print(f"{agent.name}  (id={agent.id}, bkn={agent.kn_ids})")
-
-# Multi-turn conversation with a specific agent
-conv_id = ""
-for question in ["What can you do?", "Analyse recent inventory data", "Give improvement suggestions"]:
-    reply = kweaver.chat(question, agent_id="supply-chain-agent-id", conversation_id=conv_id)
-    conv_id = reply.conversation_id
-    print(f"Q: {question}")
-    print(f"A: {reply.content}\n")
-```
-
----
-
-## API Reference
-
-### `kweaver.configure(url, *, token, bkn_id, agent_id, ...)`
-
-Initialises the default client. Must be called before any other function.
-
-| Parameter | Description |
-|---|---|
-| `url` | KWeaver service URL |
-| `token` | Bearer token (recommended) |
-| `username` / `password` | Username/password login (requires Playwright) |
-| `config` | Load credentials from the local config file (`~/.kweaver/`) |
-| `bkn_id` | Default BKN ID used by `search()` and `weaver()` |
-| `agent_id` | Default Agent ID used by `chat()` |
-
-### `kweaver.search(query, *, bkn_id, mode, max_concepts)`
-
-Semantic search over a BKN. Returns `SemanticSearchResult`.
-
-### `kweaver.chat(message, *, agent_id, stream, conversation_id)`
-
-Send a message to an agent. Returns `Message` (or `Iterator[MessageChunk]` when `stream=True`).
-
-### `kweaver.weaver(*, bkn_id, wait, timeout)`
-
-Trigger a full BKN build / index rebuild. **Only needed after write operations** — read-only use cases do not require this. Returns `BuildJob`.
-
-### `kweaver.agents(*, keyword, status, limit)`
-
-List agents. Returns `list[Agent]`.
-
-### `kweaver.bkns(*, name, limit)`
-
-List BKNs. Returns `list[KnowledgeNetwork]`.
-
----
-
-## Low-level Client
-
-The top-level API covers the most common operations. For full access (datasources, object types, relation types, actions, etc.), use the low-level client directly:
-
-```python
-import kweaver
-
-kweaver.configure(url="...", token="...")
-client = kweaver._default_client   # KWeaverClient instance
-
-# Full API
-client.datasources.list(bkn_id="...")
-client.object_types.list(bkn_id="...")
-client.action_types.execute(bkn_id="...", action_type_id="...")
-```
-
-Or instantiate directly:
-
-```python
-from kweaver import KWeaverClient, TokenAuth
+from kweaver import KWeaverClient, ConfigAuth
 
 client = KWeaverClient(
-    base_url="https://kweaver.example.com",
-    auth=TokenAuth("my-token"),
+    auth=ConfigAuth(),           # reads ~/.kweaver/ credentials
+    debug=True,                  # print request/response diagnostics
+    vega_url="http://vega:13014", # optional: connect to Vega
+)
+
+# BKN — Knowledge Networks
+kns = client.knowledge_networks.list()
+report = client.knowledge_networks.inspect("kn-123")  # one-shot diagnosis
+
+# BKN — Schema
+ots = client.object_types.list("kn-123")
+ot = client.object_types.get("kn-123", "ot-456")      # includes data_properties
+cgs = client.concept_groups.list("kn-123")
+jobs = client.jobs.list("kn-123")
+
+# Vega — Data Platform
+catalogs = client.vega.catalogs.list()
+resources = client.vega.resources.list(catalog_id="cat-1", category="table")
+models = client.vega.metric_models.list()
+
+# Vega — Query
+result = client.vega.query.dsl(body={"query": {"match_all": {}}, "size": 10})
+result = client.vega.query.execute(tables=[...], output_fields=["*"], limit=20)
+
+# Vega — Diagnostics
+info = client.vega.health()
+report = client.vega.inspect()
+```
+
+### Observability
+
+```python
+# Debug mode — print full HTTP diagnostics + curl commands to stderr
+client = KWeaverClient(auth=ConfigAuth(), debug=True)
+
+# Dry-run — intercept write operations without sending to server
+client = KWeaverClient(auth=ConfigAuth(), dry_run=True)
+```
+
+---
+
+## CLI
+
+```bash
+pip install kweaver-sdk[cli]
+```
+
+### Context & Status
+
+```bash
+kweaver auth login https://kweaver.example.com   # browser OAuth login
+kweaver use kn-abc123                             # set default KN context
+
+kweaver bkn                                       # KN overview (= inspect)
+kweaver vega                                      # Vega platform overview
+```
+
+### BKN Commands
+
+```bash
+kweaver bkn object-type list                      # uses context from 'kweaver use'
+kweaver bkn object-type get ot-456 -v             # verbose: includes data_properties
+kweaver bkn concept-group list
+kweaver bkn job list --status running
+kweaver bkn inspect --full
+```
+
+### Vega Commands
+
+```bash
+kweaver vega catalog list
+kweaver vega catalog health --all
+kweaver vega resource list --category table
+kweaver vega model list --type metric
+kweaver vega query dsl -d '{"query": {"match_all": {}}, "size": 5}'
+kweaver vega health
+kweaver vega inspect
+```
+
+### Global Flags
+
+```bash
+kweaver --debug bkn list           # full request/response diagnostics
+kweaver --dry-run bkn concept-group create kn-1 --name test   # preview without sending
+kweaver --format json vega catalog list   # output as JSON (default: markdown)
+```
+
+---
+
+## SDK Resources
+
+### BKN (Knowledge Networks)
+
+| Resource | Access | Methods |
+|----------|--------|---------|
+| Knowledge Networks | `client.knowledge_networks` | `list`, `get`, `create`, `update`, `delete`, `build`, `export`, `inspect` |
+| Object Types | `client.object_types` | `list`, `get`, `create`, `update`, `delete` |
+| Relation Types | `client.relation_types` | `list`, `get`, `create`, `update`, `delete` |
+| Action Types | `client.action_types` | `list`, `execute`, `cancel` |
+| Concept Groups | `client.concept_groups` | `list`, `get`, `create`, `update`, `delete`, `add_members`, `remove_members` |
+| Jobs | `client.jobs` | `list`, `get_tasks`, `delete`, `wait` |
+| Query | `client.query` | `semantic_search`, `instances`, `instances_iter`, `kn_search`, `subgraph` |
+| Agents | `client.agents` | `list`, `get` |
+| Conversations | `client.conversations` | `send_message`, `list_messages` |
+
+### Vega (Data Platform)
+
+| Resource | Access | Methods |
+|----------|--------|---------|
+| Catalogs | `client.vega.catalogs` | `list`, `get`, `health_status`, `health_report`, `test_connection`, `discover`, `resources` |
+| Resources | `client.vega.resources` | `list`, `get`, `data`, `preview` |
+| Connector Types | `client.vega.connector_types` | `list`, `get` |
+| Metric Models | `client.vega.metric_models` | `list`, `get` |
+| Event Models | `client.vega.event_models` | `list`, `get` |
+| Trace Models | `client.vega.trace_models` | `list`, `get` |
+| Data Views | `client.vega.data_views` | `list`, `get` |
+| Data Dicts | `client.vega.data_dicts` | `list`, `get` |
+| Objective Models | `client.vega.objective_models` | `list`, `get` |
+| Query | `client.vega.query` | `execute`, `dsl`, `dsl_count`, `promql`, `promql_instant`, `events` |
+| Tasks | `client.vega.tasks` | `list_discover`, `get_discover`, `wait_discover`, `get_metric` |
+| Namespace | `client.vega` | `health`, `stats`, `inspect` |
+
+### Configuration
+
+```python
+KWeaverClient(
+    base_url="https://...",          # KWeaver platform URL
+    auth=ConfigAuth(),               # or TokenAuth("...") or PasswordAuth(...)
+    vega_url="http://vega:13014",    # optional: Vega data platform URL
+    debug=False,                     # print request/response diagnostics
+    dry_run=False,                   # intercept write operations
 )
 ```
+
+| Env Variable | Description |
+|---|---|
+| `KWEAVER_BASE_URL` | Platform URL |
+| `KWEAVER_TOKEN` | Bearer token |
+| `KWEAVER_VEGA_URL` | Vega backend URL |
+| `KWEAVER_DEBUG` | Enable debug mode (`true`) |
+| `KWEAVER_FORMAT` | CLI output format (`md`/`json`/`yaml`) |
+
+---
 
 ## Links
 
