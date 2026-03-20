@@ -381,9 +381,10 @@ export async function ensureValidToken(): Promise<TokenConfig> {
   const envToken = process.env.KWEAVER_TOKEN;
   const envBaseUrl = process.env.KWEAVER_BASE_URL;
   if (envToken && envBaseUrl) {
+    const rawToken = envToken.replace(/^Bearer\s+/i, "");
     return {
       baseUrl: normalizeBaseUrl(envBaseUrl),
-      accessToken: envToken,
+      accessToken: rawToken,
       tokenType: "bearer",
       scope: "openid",
       obtainedAt: new Date().toISOString(),

@@ -78,6 +78,8 @@ test("subgraph maps path and body", async () => {
     assert.equal(init?.method, "POST");
     assert.equal(url.pathname, "/api/ontology-query/v1/knowledge-networks/kn-1/subgraph");
     assert.equal(init?.body, "{\"relation_type_paths\":[]}");
+    const headers = init?.headers as Record<string, string>;
+    assert.equal(headers["X-HTTP-Method-Override"], "GET");
     return new Response("{\"objects\":{}}", { status: 200 });
   };
 

@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from kweaver._errors import KWeaverError
-from kweaver.types import BuildJob, BuildStatus, KNStatistics, KnowledgeNetwork
+from kweaver.types import BKNInspectReport, BuildJob, BuildStatus, Job, KNStatistics, KnowledgeNetwork
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,29 @@ class KnowledgeNetworksResource:
         job = BuildJob(kn_id=id)
         job.set_poll_fn(lambda: self.build_status(id))
         return job
+
+    def inspect(self, kn_id: str, *, full: bool = False) -> BKNInspectReport:
+        """One-shot diagnosis: KN info + stats + active jobs."""
+        kn = self.get(kn_id, include_statistics=True)
+
+        # Get active jobs (best effort — partial failure tolerance)
+        active_jobs: list[Job] = []
+        try:
+            from kweaver.resources.jobs import _parse_job
+            data = self._http.get(
+                f"/api/ontology-manager/v1/knowledge-networks/{kn_id}/jobs",
+                params={"status": "running", "limit": 20},
+            )
+            entries = data.get("entries", data.get("data", [])) if isinstance(data, dict) else []
+            active_jobs = [_parse_job(e) for e in entries]
+        except Exception:
+            pass
+
+        return BKNInspectReport(
+            kn=kn,
+            stats=kn.statistics or KNStatistics(),
+            active_jobs=active_jobs,
+        )
 
     def build_status(self, id: str) -> BuildStatus:
         """Check build status via the public ontology-manager endpoint."""

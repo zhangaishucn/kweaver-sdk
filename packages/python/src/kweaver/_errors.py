@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 
 
@@ -59,6 +61,40 @@ class ServerError(KWeaverError):
 
 class NetworkError(KWeaverError):
     """Network unreachable (distinct from builtin ConnectionError)."""
+
+
+class DryRunIntercepted(KWeaverError):
+    """Raised when a write request is intercepted by dry-run mode."""
+
+    def __init__(self, method: str, url: str, body: Any = None) -> None:
+        self.method = method
+        self.url = url
+        self.body = body
+        super().__init__(f"[DRY RUN] {method} {url}")
+
+
+class VegaError(KWeaverError):
+    """Base for all Vega errors."""
+
+
+class VegaConnectionError(VegaError):
+    def __init__(self, message: str, *, catalog_id: str = "", connector_type: str = "", **kw):
+        super().__init__(message, **kw)
+        self.catalog_id = catalog_id
+        self.connector_type = connector_type
+
+
+class VegaQueryError(VegaError):
+    def __init__(self, message: str, *, query_type: str = "", **kw):
+        super().__init__(message, **kw)
+        self.query_type = query_type
+
+
+class VegaDiscoverError(VegaError):
+    def __init__(self, message: str, *, catalog_id: str = "", task_id: str = "", **kw):
+        super().__init__(message, **kw)
+        self.catalog_id = catalog_id
+        self.task_id = task_id
 
 
 _STATUS_MAP: dict[int, type[KWeaverError]] = {

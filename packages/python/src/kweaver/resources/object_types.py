@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from kweaver._errors import KWeaverError
-from kweaver.types import DataProperty, ObjectType, ObjectTypeStatus, Property
+from kweaver.types import DataProperty, DataPropertyDetail, ObjectType, ObjectTypeStatus, Property
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +201,24 @@ def _parse_object_type(d: dict[str, Any], kn_id: str) -> ObjectType:
             )
         )
 
+    data_property_details: list[DataPropertyDetail] = []
+    for dp in d.get("data_properties", []):
+        if isinstance(dp, dict):
+            data_property_details.append(
+                DataPropertyDetail(
+                    name=dp.get("name", ""),
+                    display_name=dp.get("display_name"),
+                    type=dp.get("type", "string"),
+                    indexed=dp.get("indexed", False),
+                    full_text=dp.get("full_text", False),
+                    vector=dp.get("vector", False),
+                    required=dp.get("required", False),
+                    default_value=dp.get("default_value"),
+                    enum_values=dp.get("enum_values"),
+                    mapped_field=dp.get("mapped_field"),
+                )
+            )
+
     status_data = d.get("status")
     status = ObjectTypeStatus(**status_data) if isinstance(status_data, dict) else None
 
@@ -213,5 +231,6 @@ def _parse_object_type(d: dict[str, Any], kn_id: str) -> ObjectType:
         display_key=d.get("display_key", ""),
         incremental_key=d.get("incremental_key"),
         properties=props,
+        data_properties=data_property_details,
         status=status,
     )

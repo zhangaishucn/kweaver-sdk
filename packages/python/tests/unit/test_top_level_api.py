@@ -181,7 +181,7 @@ class TestAgents:
             {"id": "a1", "name": "助手A", "status": "published"},
             {"id": "a2", "name": "助手B", "status": "published"},
         ]
-        _configure({"/agent-list": agent_response})
+        _configure({"/published/agent": agent_response})
         result = kweaver.agents()
         assert len(result) == 2
         assert result[0].name == "助手A"

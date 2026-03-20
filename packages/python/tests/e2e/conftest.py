@@ -62,6 +62,7 @@ E2E_ENV: dict[str, dict[str, str]] = {
         "token": os.getenv("KWEAVER_TOKEN", ""),
         "account_id": os.getenv("KWEAVER_ACCOUNT_ID", "test"),
         "business_domain": os.getenv("KWEAVER_BUSINESS_DOMAIN", ""),
+        "vega_url": os.getenv("KWEAVER_VEGA_URL", ""),
         # Database credentials for datasource tests
         "db_type": os.getenv("KWEAVER_TEST_DB_TYPE", "mysql"),
         "db_host": os.getenv("KWEAVER_TEST_DB_HOST", ""),
@@ -172,12 +173,14 @@ def kweaver_client(e2e_env: dict[str, str]) -> KWeaverClient:
     """Session-scoped KWeaverClient connected to the E2E environment."""
     # Prefer PasswordAuth (auto-refresh) over static token
     auth = e2e_env.get("_auth")
+    vega_url = e2e_env.get("vega_url") or None
     if auth:
         client = KWeaverClient(
             base_url=e2e_env["base_url"],
             auth=auth,
             account_id=e2e_env.get("account_id", "test"),
             business_domain=e2e_env.get("business_domain") or None,
+            vega_url=vega_url,
         )
     else:
         client = KWeaverClient(
@@ -185,6 +188,7 @@ def kweaver_client(e2e_env: dict[str, str]) -> KWeaverClient:
             token=e2e_env["token"],
             account_id=e2e_env.get("account_id", "test"),
             business_domain=e2e_env.get("business_domain") or None,
+            vega_url=vega_url,
         )
     yield client
     client.close()
@@ -274,3 +278,39 @@ def cli_runner(e2e_env: dict[str, str]) -> CliRunner:
     if e2e_env.get("business_domain"):
         env["KWEAVER_BUSINESS_DOMAIN"] = e2e_env["business_domain"]
     return CliRunner(env=env)
+
+
+@pytest.fixture(scope="session")
+def kweaver_client_factory(e2e_env: dict[str, str]):
+    """Factory: create KWeaverClient with custom observability options."""
+    clients: list[KWeaverClient] = []
+
+    def _make(**kwargs: Any) -> KWeaverClient:
+        auth = e2e_env.get("_auth")
+        vega_url = e2e_env.get("vega_url") or None
+        if auth:
+            c = KWeaverClient(
+                base_url=e2e_env["base_url"],
+                auth=auth,
+                business_domain=e2e_env.get("business_domain") or None,
+                vega_url=vega_url,
+                **kwargs,
+            )
+        else:
+            c = KWeaverClient(
+                base_url=e2e_env["base_url"],
+                token=e2e_env["token"],
+                business_domain=e2e_env.get("business_domain") or None,
+                vega_url=vega_url,
+                **kwargs,
+            )
+        clients.append(c)
+        return c
+
+    yield _make
+
+    for c in clients:
+        try:
+            c.close()
+        except Exception:
+            pass

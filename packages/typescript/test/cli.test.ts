@@ -1401,3 +1401,15 @@ test("ensureValidToken returns env token when KWEAVER_TOKEN and KWEAVER_BASE_URL
     delete process.env.KWEAVER_BASE_URL;
   }
 });
+
+test("ensureValidToken strips Bearer prefix from KWEAVER_TOKEN env var", async () => {
+  process.env.KWEAVER_TOKEN = "Bearer my-raw-token";
+  process.env.KWEAVER_BASE_URL = "https://env.example.com/";
+  try {
+    const result = await ensureValidToken();
+    assert.equal(result.accessToken, "my-raw-token");
+  } finally {
+    delete process.env.KWEAVER_TOKEN;
+    delete process.env.KWEAVER_BASE_URL;
+  }
+});

@@ -13,12 +13,25 @@ from kweaver.cli.agent import agent_group
 from kweaver.cli.call import call_cmd
 from kweaver.cli.context_loader import context_loader_group
 from kweaver.cli.token_cmd import token_cmd
+from kweaver.cli.use import use_cmd
 
 
 @click.group()
 @click.version_option(package_name="kweaver-sdk")
-def cli() -> None:
+@click.option("--debug", is_flag=True, default=False, envvar="KWEAVER_DEBUG",
+              help="Print full request/response diagnostics.")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Show write operations without executing them.")
+@click.option("--format", "output_format", type=click.Choice(["md", "json", "yaml"]),
+              default="md", envvar="KWEAVER_FORMAT",
+              help="Output format (default: md).")
+@click.pass_context
+def cli(ctx: click.Context, debug: bool, dry_run: bool, output_format: str) -> None:
     """KWeaver CLI — manage KWeaver knowledge networks, agents, and more."""
+    ctx.ensure_object(dict)
+    ctx.obj["debug"] = debug
+    ctx.obj["dry_run"] = dry_run
+    ctx.obj["output_format"] = output_format
 
 
 cli.add_command(auth_group, "auth")
@@ -30,6 +43,7 @@ cli.add_command(agent_group, "agent")
 cli.add_command(call_cmd, "call")
 cli.add_command(context_loader_group, "context-loader")
 cli.add_command(token_cmd, "token")
+cli.add_command(use_cmd, "use")
 
 
 def main() -> None:

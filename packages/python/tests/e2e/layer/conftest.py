@@ -57,3 +57,12 @@ def cl_context(kweaver_client: KWeaverClient, e2e_env: dict):
                         "sample": result.data[0],
                     }
     pytest.skip("No KN with indexed data and instance identities found")
+
+
+@pytest.fixture(scope="module")
+def vega_client(kweaver_client: KWeaverClient):
+    """Vega namespace, skips if KWEAVER_VEGA_URL not configured."""
+    try:
+        return kweaver_client.vega
+    except ValueError:
+        pytest.skip("KWEAVER_VEGA_URL not configured")

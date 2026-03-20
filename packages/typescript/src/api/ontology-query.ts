@@ -122,7 +122,7 @@ export async function objectTypeProperties(options: ObjectTypePropertiesOptions)
   return responseBody;
 }
 
-/** Subgraph: POST */
+/** Subgraph: POST with X-HTTP-Method-Override: GET */
 export interface SubgraphOptions extends OntologyQueryBaseOptions {
   body: string;
   includeLogicParams?: boolean;
@@ -161,6 +161,7 @@ export async function subgraph(options: SubgraphOptions): Promise<string> {
   const headers: Record<string, string> = {
     ...buildHeaders(accessToken, businessDomain),
     "content-type": "application/json",
+    "X-HTTP-Method-Override": "GET",
   };
 
   const response = await fetch(url.toString(), {

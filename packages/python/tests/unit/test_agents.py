@@ -1,12 +1,14 @@
 """Tests for agents resource (agent-factory v3 API)."""
 
+import json
+
 import httpx
 
 from tests.conftest import RequestCapture, make_client
 
 
 def _agent_list_json(**overrides):
-    """Simulates agent-factory /personal-space/agent-list response item."""
+    """Simulates agent-factory /published/agent response item."""
     base = {
         "id": "agent_01",
         "key": "key_01",
@@ -58,10 +60,10 @@ def test_list_agents_with_filters(capture: RequestCapture):
         return httpx.Response(200, json={"entries": []})
 
     client = make_client(handler, capture)
-    client.agents.list(keyword="供应链", status="published")
-    url = capture.last_url()
-    assert "name=" in url
-    assert "publish_status=published" in url
+    client.agents.list(keyword="供应链")
+    body = capture.last_body()
+    assert body["name"] == "供应链"
+    assert "/published/agent" in capture.last_url()
 
 
 def test_list_agents_with_offset_limit(capture: RequestCapture):
@@ -70,9 +72,9 @@ def test_list_agents_with_offset_limit(capture: RequestCapture):
 
     client = make_client(handler, capture)
     client.agents.list(offset=10, limit=20)
-    url = capture.last_url()
-    assert "offset=10" in url
-    assert "limit=20" in url
+    body = capture.last_body()
+    assert body["offset"] == 10
+    assert body["limit"] == 20
 
 
 def test_list_agents_raw_list():

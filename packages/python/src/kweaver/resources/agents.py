@@ -1,7 +1,7 @@
 """SDK resource: agents (agent-factory service).
 
 Actual backend endpoints (agent-factory v3):
-  - List:   GET  /api/agent-factory/v3/personal-space/agent-list
+  - List:   POST /api/agent-factory/v3/published/agent
   - Detail: GET  /api/agent-factory/v3/agent/{id}
 """
 
@@ -27,49 +27,37 @@ class AgentsResource:
         offset: int = 0,
         limit: int = 50,
     ) -> list[Agent]:
-        """List agents.
+        """List published agents.
 
         Args:
             keyword: Filter by name substring.
-            status: Filter by status. "published" matches both
-                    "published" and "published_edited" on the backend.
+            status: Ignored (kept for API compatibility). The published
+                    endpoint only returns published agents.
             offset: Pagination offset (default 0).
             limit: Max items to return (default 50).
         """
-        params: dict[str, Any] = {"offset": offset, "limit": limit}
-        if keyword:
-            params["name"] = keyword
-        if status:
-            params["publish_status"] = status
+        body: dict[str, Any] = {
+            "offset": offset,
+            "limit": limit,
+            "name": keyword or "",
+            "category_id": "",
+            "custom_space_id": "",
+            "is_to_square": 1,
+        }
 
-        data = self._http.get(
-            "/api/agent-factory/v3/personal-space/agent-list", params=params
+        # The agent-factory API requires text/plain content-type for this
+        # endpoint (application/json returns empty results — platform quirk).
+        data = self._http.post(
+            "/api/agent-factory/v3/published/agent",
+            json=body,
+            headers={"content-type": "text/plain;charset=UTF-8"},
         )
         items = (
             data
             if isinstance(data, list)
             else (data.get("entries") or data.get("data") or [])
         )
-        agents = [_parse_agent(d) for d in items]
-
-        # If user asked for "published", also fetch "published_edited"
-        if status == "published":
-            params["publish_status"] = "published_edited"
-            data2 = self._http.get(
-                "/api/agent-factory/v3/personal-space/agent-list", params=params
-            )
-            items2 = (
-                data2
-                if isinstance(data2, list)
-                else (data2.get("entries") or data2.get("data") or [])
-            )
-            seen = {a.id for a in agents}
-            agents.extend(
-                _parse_agent(d) for d in items2
-                if str(d.get("id", "")) not in seen
-            )
-
-        return agents
+        return [_parse_agent(d) for d in items]
 
     def get(self, id: str) -> Agent:
         data = self._http.get(f"/api/agent-factory/v3/agent/{id}")

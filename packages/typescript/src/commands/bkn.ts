@@ -730,7 +730,7 @@ Subcommands:
   object-type update <kn-id> <ot-id> [options]   Update object type
   object-type delete <kn-id> <ot-ids> [-y]   Delete object type(s)
   object-type query <kn-id> <ot-id> ['<json>']   Query object instances (ontology-query; supports --limit/--search-after)
-  object-type properties <kn-id> <ot-id> '<json>'   Query object properties
+  object-type properties <kn-id> <ot-id> '<json>'   Query instance properties (json: {"_instance_identities":[{pk:val}],"properties":[...]})
   relation-type list <kn-id>   List relation types (schema)
   relation-type get <kn-id> <rt-id>   Get relation type details
   relation-type create <kn-id> [options]   Create relation type (--name --source --target [--mapping src:tgt])
@@ -1144,7 +1144,9 @@ kweaver bkn object-type properties <kn-id> <ot-id> '<json>' [--pretty] [-bd valu
 list: List object types (schema) from ontology-manager.
 get: Get single object type details.
 create/update/delete: Schema CRUD (create requires dataview-id).
-query/properties: Query via ontology-query API. For query, --limit and --search-after are merged into the JSON body.`);
+query/properties: Query via ontology-query API. For query, --limit and --search-after are merged into the JSON body.
+
+properties JSON format: {"_instance_identities":[{"<primary-key>":"<value>"}],"properties":["prop1","prop2"]}`);
     return 0;
   }
 
@@ -1256,7 +1258,8 @@ query/properties: Query via ontology-query API. For query, --limit and --search-
       const parsed = parseOntologyQueryFlags(rest);
       const [knId, otId, body] = parsed.filteredArgs;
       if (!knId || !otId || !body) {
-        console.error("Usage: kweaver bkn object-type properties <kn-id> <ot-id> '<json>' [options]");
+        console.error(`Usage: kweaver bkn object-type properties <kn-id> <ot-id> '<json>' [options]
+JSON: {"_instance_identities":[{"<primary-key>":"<value>"}],"properties":["prop1","prop2"]}`);
         return 1;
       }
 
@@ -1582,6 +1585,17 @@ Query subgraph via ontology-query API. JSON body format see references/json-form
   }
 
   try {
+    // Auto-detect query_type=relation_path when body contains source_object_type_id
+    let queryType: "" | "relation_path" | undefined;
+    try {
+      const parsedBody = JSON.parse(body) as Record<string, unknown>;
+      if (parsedBody.source_object_type_id) {
+        queryType = "relation_path";
+      }
+    } catch {
+      // Not valid JSON — let the API return the error
+    }
+
     const token = await ensureValidToken();
     const result = await subgraph({
       baseUrl: token.baseUrl,
@@ -1589,6 +1603,7 @@ Query subgraph via ontology-query API. JSON body format see references/json-form
       knId,
       body,
       businessDomain,
+      queryType,
     });
     console.log(formatCallOutput(result, pretty));
     return 0;
