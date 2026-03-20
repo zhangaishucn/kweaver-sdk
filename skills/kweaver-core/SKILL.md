@@ -4,11 +4,20 @@ description: >-
   通过 kweaver CLI 登录 KWeaver 平台、与 Agent 对话、管理和查询知识网络（KN）、
   调用 Context Loader 从知识网络检索概念和实例。
   当用户需要认证、Agent 对话、KN 管理/查询、知识检索时使用。
+  若与 create-bkn SKILL 同时加载：编写模块化 BKN 目录用 create-bkn，上传/导入用本 CLI（如 kweaver bkn push）。
 ---
 
 # KWeaver CLI
 
 KWeaver 平台的命令行工具，覆盖认证、知识网络管理与查询、Agent 对话、Context Loader 检索、通用 API 调用。
+
+## 与 create-bkn 搭配
+
+若 **kweaver-core** 与 **create-bkn** 同时可用：
+
+- 需要**从零编写 BKN** `network.bkn`、`object_types/`、`relation_types/` 等模块化 BKN 时 → 可以先使用 create-bkn skill。
+- 目录就绪后 → 使用本 skill 的 **`kweaver auth`**、**`kweaver bkn push <目录>`**（及 `pull`、build、schema CRUD 等）对接平台。
+- 仅**推送已有** BKN 目录时 → 只需本 skill，不必加载 create-bkn。
 
 ## 安装
 

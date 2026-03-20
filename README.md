@@ -247,6 +247,9 @@ make -C packages/typescript test
 
 Install [Agent Skills](https://skills.sh) with the [`skills` CLI](https://www.npmjs.com/package/skills) (`npx skills add`):
 
+- **Multiple skills from this repo** — pass `--skill` more than once in a single `npx skills add` (see combined install below).
+- **Skills from other repos** — run `npx skills add <other-repo-url>` separately for each repository.
+
 ```bash
 # KWeaver CLI — auth, BKN/KN management, agents, Context Loader
 npx skills add https://github.com/kweaver-ai/kweaver-sdk --skill kweaver-core
@@ -254,9 +257,9 @@ npx skills add https://github.com/kweaver-ai/kweaver-sdk --skill kweaver-core
 # BKN authoring — modular BKN v2.0.0 definitions (object/relation/action types, …)
 npx skills add https://github.com/kweaver-ai/kweaver-sdk --skill create-bkn
 
-# Both (example: Cursor only, global install, non-interactive)
+# Install kweaver-core and create-bkn in one command
 npx skills add https://github.com/kweaver-ai/kweaver-sdk \
-  --skill kweaver-core --skill create-bkn -a cursor -g -y
+  --skill kweaver-core --skill create-bkn
 ```
 
 [![skills.sh](https://skills.sh/badge/kweaver-core)](https://skills.sh/kweaver-ai/kweaver-sdk)

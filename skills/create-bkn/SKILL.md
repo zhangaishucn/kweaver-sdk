@@ -5,11 +5,23 @@ description: >-
   Covers network, object_type, relation_type, action_type, concept_group.
   Use when creating knowledge networks, BKN files, object types, relation types, action types,
   concept groups, or when user asks to model business knowledge in BKN format.
+  When kweaver-core is also loaded, use it to run kweaver CLI (auth, bkn push) after files exist.
 ---
 
 # Create BKN
 
 Generate well-formed BKN knowledge network definitions following v2.0.0 specification.
+
+## Works with kweaver-core
+
+If **both** skills are loaded:
+
+| Role | Skill |
+|------|--------|
+| Author modular `.bkn` trees (layout, sections, templates) | **create-bkn** (this skill) |
+| Install CLI, auth, **`kweaver bkn push` / `pull`**, other `kweaver bkn` ops | **kweaver-core** |
+
+Typical flow: generate or edit the directory with create-bkn → then use kweaver-core’s workflow for `kweaver auth login` and `kweaver bkn push <dir>`. If you only operate the CLI and need new BKN files from scratch, switch to **create-bkn** for generation first.
 
 ## What is BKN
 
@@ -56,7 +68,24 @@ Every BKN network uses this modular layout — **each definition is a separate f
 6. **Create `concept_groups/*.bkn`** — optional, read [references/concept_groups.md](references/concept_groups.md)
 7. **Update `network.bkn`** — list all IDs in Network Overview
 8. **Add `SKILL.md`** — agent-facing guide (see below)
-9. **Validate** — `kweaver bkn validate network <dir>`
+9. **Import** — `kweaver bkn push <dir>` (validates with `loadNetwork`, then uploads tar). See below.
+
+## Import via kweaver CLI
+
+**Install** (pick one):
+
+- **TypeScript / Node** (recommended): `npm install -g @kweaver-ai/kweaver-sdk` — requires Node.js 22+
+- **Python**: `pip install kweaver-sdk[cli]` — requires Python ≥ 3.10
+- One-off without global install: `npx kweaver …` (same subcommands)
+
+Full install matrix: [README.md](../../README.md) (this repo root).
+
+```bash
+kweaver auth login https://your-kweaver-instance.com
+kweaver bkn push <path-to-bkn-directory> [--branch main] [-bd <business-domain>]
+```
+
+`push` packs the directory (macOS tar uses `COPYFILE_DISABLE=1`), may refresh `CHECKSUM`, then imports on the platform. Export: `kweaver bkn pull <kn-id> [<dir>]`. More `kweaver bkn` commands: [kweaver-core/references/bkn.md](../kweaver-core/references/bkn.md).
 
 ## Per-Type Reference
 

@@ -299,6 +299,9 @@ make -C packages/typescript test
 
 使用 [`skills` CLI](https://www.npmjs.com/package/skills)（`npx skills add`）安装 [Agent Skills](https://skills.sh)：
 
+- **同一仓库多个 skill**：一条命令里重复写 `--skill`（见下方合并安装示例）。
+- **不同仓库**：对每个仓库分别执行一次 `npx skills add <仓库 URL>`。
+
 ```bash
 # KWeaver CLI — 认证、BKN/知识网络、Agent、Context Loader
 npx skills add https://github.com/kweaver-ai/kweaver-sdk --skill kweaver-core
@@ -306,9 +309,9 @@ npx skills add https://github.com/kweaver-ai/kweaver-sdk --skill kweaver-core
 # BKN 建模 — 模块化 BKN v2.0.0（对象类/关系类/行动类等）
 npx skills add https://github.com/kweaver-ai/kweaver-sdk --skill create-bkn
 
-# 同时安装（示例：仅 Cursor、全局、非交互）
+# 一条命令同时安装 kweaver-core 与 create-bkn
 npx skills add https://github.com/kweaver-ai/kweaver-sdk \
-  --skill kweaver-core --skill create-bkn -a cursor -g -y
+  --skill kweaver-core --skill create-bkn
 ```
 
 [![skills.sh](https://skills.sh/badge/kweaver-core)](https://skills.sh/kweaver-ai/kweaver-sdk)
