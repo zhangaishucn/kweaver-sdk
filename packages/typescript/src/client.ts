@@ -1,7 +1,6 @@
 import {
   getCurrentPlatform,
   loadTokenConfig,
-  loadClientConfig,
 } from "./config/store.js";
 import { ensureValidToken } from "./auth/oauth.js";
 import { AgentsResource } from "./resources/agents.js";
@@ -185,19 +184,9 @@ export class KWeaverClient implements ClientContext {
         { headers: { authorization: `Bearer ${token.accessToken}`, token: token.accessToken } },
       );
       if (probe.status === 401) {
-        try {
-          token = await ensureValidToken({ forceRefresh: true });
-        } catch {
-          throw new Error(
-            "Access token revoked and refresh token also expired. " +
-            "Run `kweaver auth login` to re-authenticate."
-          );
-        }
-        return new KWeaverClient({
-          baseUrl: token.baseUrl,
-          accessToken: token.accessToken,
-          ...opts,
-        });
+        throw new Error(
+          "Access token revoked. Run `kweaver auth login` to re-authenticate."
+        );
       }
     } catch {
       // Network error — return client as-is, let the caller deal with it

@@ -108,14 +108,6 @@ test("run agent sessions prints conversations for agent", { concurrency: false }
   const configDir = createConfigDir();
   process.env.KWEAVERC_CONFIG_DIR = configDir;
   const store = await importStoreModule(configDir);
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "c",
-    clientSecret: "s",
-    redirectUri: "http://127.0.0.1:9010/cb",
-    logoutRedirectUri: "http://127.0.0.1:9010/logout",
-    scope: "openid",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-test",
@@ -144,14 +136,6 @@ test("run agent history prints messages for conversation", { concurrency: false 
   const configDir = createConfigDir();
   process.env.KWEAVERC_CONFIG_DIR = configDir;
   const store = await importStoreModule(configDir);
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "c",
-    clientSecret: "s",
-    redirectUri: "http://127.0.0.1:9010/cb",
-    logoutRedirectUri: "http://127.0.0.1:9010/logout",
-    scope: "openid",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-test",

@@ -1,17 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { run } from "../src/cli.js";
-import {
-  formatAuthStatusSummary,
-  getClientProvisioningMessage,
-} from "../src/commands/auth.js";
 import {
   formatCallOutput,
   formatVerboseRequest,
@@ -40,11 +34,8 @@ import {
 } from "../src/commands/agent.js";
 import { parseTokenArgs } from "../src/commands/token.js";
 import {
-  buildAuthorizationUrl,
-  buildAuthRedirectConfig,
   ensureValidToken,
   formatHttpError,
-  getAuthorizationSuccessMessage,
 } from "../src/auth/oauth.js";
 import { HttpError, NetworkRequestError } from "../src/utils/http.js";
 
@@ -68,28 +59,6 @@ async function importStoreModule(configDir: string) {
   process.env.KWEAVERC_CONFIG_DIR = configDir;
   const moduleUrl = pathToFileURL(join(process.cwd(), "src/config/store.ts")).href;
   return import(`${moduleUrl}?t=${Date.now()}-${Math.random()}`);
-}
-
-async function listen(server: ReturnType<typeof createServer>): Promise<number> {
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve());
-  });
-  return (server.address() as AddressInfo).port;
-}
-
-async function reservePort(): Promise<number> {
-  const server = createServer();
-  const port = await listen(server);
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    });
-  });
-  return port;
 }
 
 test("parseCallArgs parses curl-style request flags", () => {
@@ -190,14 +159,6 @@ test("run context-loader config show when not configured", async () => {
   process.env.KWEAVERC_CONFIG_DIR = configDir;
 
   const store = await importStoreModule(configDir);
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "c",
-    clientSecret: "s",
-    redirectUri: "http://127.0.0.1:9010/cb",
-    logoutRedirectUri: "http://127.0.0.1:9010/logout",
-    scope: "openid",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "t",
@@ -217,14 +178,6 @@ test("run context-loader config set use list", async () => {
   process.env.KWEAVERC_CONFIG_DIR = configDir;
 
   const store = await importStoreModule(configDir);
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "c",
-    clientSecret: "s",
-    redirectUri: "http://127.0.0.1:9010/cb",
-    logoutRedirectUri: "http://127.0.0.1:9010/logout",
-    scope: "openid",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "t",
@@ -249,156 +202,6 @@ test("run context-loader config set use list", async () => {
   assert.equal(await cli.run(["context-loader", "config", "list"]), 0);
 });
 
-test("buildAuthorizationUrl generates a complete oauth url from client config", () => {
-  const authorizationUrl = buildAuthorizationUrl(
-    {
-      baseUrl: "https://dip.aishu.cn",
-      clientId: "client-123",
-      clientSecret: "secret-123",
-      redirectUri: "http://127.0.0.1:9010/callback",
-      logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-      scope: "openid offline all",
-      lang: "zh-cn",
-      product: "adp",
-      xForwardedPrefix: "",
-    },
-    "state-123"
-  );
-
-  const url = new URL(authorizationUrl);
-  assert.equal(url.origin, "https://dip.aishu.cn");
-  assert.equal(url.pathname, "/oauth2/auth");
-  assert.equal(url.searchParams.get("client_id"), "client-123");
-  assert.equal(url.searchParams.get("redirect_uri"), "http://127.0.0.1:9010/callback");
-  assert.equal(url.searchParams.get("scope"), "openid offline all");
-  assert.equal(url.searchParams.get("response_type"), "code");
-  assert.equal(url.searchParams.get("state"), "state-123");
-  assert.equal(url.searchParams.get("lang"), "zh-cn");
-  assert.equal(url.searchParams.get("product"), "adp");
-});
-
-test("buildAuthRedirectConfig uses localhost callback by default", () => {
-  const config = buildAuthRedirectConfig({ port: 9010 });
-
-  assert.equal(config.redirectUri, "http://127.0.0.1:9010/callback");
-  assert.equal(config.logoutRedirectUri, "http://127.0.0.1:9010/successful-logout");
-  assert.equal(config.listenHost, "127.0.0.1");
-  assert.equal(config.listenPort, 9010);
-  assert.equal(config.callbackPath, "/callback");
-});
-
-test("buildAuthRedirectConfig supports host and redirect override", () => {
-  const config = buildAuthRedirectConfig({
-    port: 9010,
-    host: "0.0.0.0",
-    redirectUriOverride: "https://auth.example.com/kweaver/callback",
-  });
-
-  assert.equal(config.redirectUri, "https://auth.example.com/kweaver/callback");
-  assert.equal(config.logoutRedirectUri, "https://auth.example.com/kweaver/successful-logout");
-  assert.equal(config.listenHost, "0.0.0.0");
-  assert.equal(config.listenPort, 9010);
-  assert.equal(config.callbackPath, "/kweaver/callback");
-});
-
-test("login with --no-open prints headless instructions and accepts callback", async () => {
-  const configDir = createConfigDir();
-  process.env.KWEAVERC_CONFIG_DIR = configDir;
-
-  const oauthServer = createServer((request, response) => {
-    if (request.method === "POST" && request.url === "/oauth2/clients") {
-      response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ client_id: "client-headless", client_secret: "secret-headless" }));
-      return;
-    }
-
-    if (request.method === "POST" && request.url === "/oauth2/token") {
-      response.setHeader("content-type", "application/json");
-      response.end(
-        JSON.stringify({
-          access_token: "token-headless",
-          token_type: "bearer",
-          scope: "openid offline all",
-          refresh_token: "refresh-headless",
-        })
-      );
-      return;
-    }
-
-    response.statusCode = 404;
-    response.end("not found");
-  });
-
-  const platformPort = await listen(oauthServer);
-  const callbackPort = await reservePort();
-  const output: string[] = [];
-  const originalConsoleLog = console.log;
-
-  try {
-    console.log = (...args: unknown[]) => {
-      output.push(args.map(String).join(" "));
-    };
-
-    const loginPromise = import("../src/auth/oauth.js").then(({ login }) =>
-      login({
-        baseUrl: `http://127.0.0.1:${platformPort}`,
-        port: callbackPort,
-        clientName: "kweaver-test",
-        open: false,
-        forceRegister: true,
-        host: "127.0.0.1",
-        redirectUriOverride: "https://auth.example.com/kweaver/callback",
-      })
-    );
-
-    let authorizationUrl = "";
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      authorizationUrl = output.find((line) => line.includes("/oauth2/auth?")) ?? "";
-      if (authorizationUrl) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-
-    assert.ok(authorizationUrl, "expected auth URL to be printed in headless mode");
-    const state = new URL(authorizationUrl).searchParams.get("state");
-    assert.ok(state, "expected auth URL to include state");
-
-    const callbackResponse = await fetch(
-      `http://127.0.0.1:${callbackPort}/kweaver/callback?code=code-headless&state=${state}`
-    );
-    assert.equal(callbackResponse.status, 200);
-    assert.equal(await callbackResponse.text(), getAuthorizationSuccessMessage());
-
-    const result = await loginPromise;
-    assert.equal(result.client.redirectUri, "https://auth.example.com/kweaver/callback");
-    assert.equal(result.callback.code, "code-headless");
-    assert.equal(result.token.accessToken, "token-headless");
-
-    assert.ok(output.includes("Authorization URL:"));
-    assert.ok(output.includes("Redirect URI: https://auth.example.com/kweaver/callback"));
-    assert.ok(output.includes(`Waiting for OAuth callback on http://127.0.0.1:${callbackPort}/kweaver/callback`));
-    assert.ok(output.includes("If your browser is on another machine, use SSH port forwarding first:"));
-    assert.ok(output.includes(`ssh -L ${callbackPort}:127.0.0.1:${callbackPort} user@server`));
-  } finally {
-    console.log = originalConsoleLog;
-    await new Promise<void>((resolve, reject) => {
-      oauthServer.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
-  }
-});
-
-test("getClientProvisioningMessage describes whether a client was reused or created", () => {
-  assert.equal(getClientProvisioningMessage(true), "Registered a new OAuth client.");
-  assert.equal(getClientProvisioningMessage(false), "Reusing existing OAuth client.");
-});
-
 test("help text exposes auth as completing oauth login through local callback", async () => {
   assert.equal(await run(["help"]), 0);
 });
@@ -408,14 +211,6 @@ test("run auth delete removes a saved platform by alias", async () => {
   const store = await importStoreModule(configDir);
   const auth = await importAuthModule(configDir);
 
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "client-a",
-    clientSecret: "secret-a",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-    scope: "openid offline all",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-a",
@@ -426,13 +221,12 @@ test("run auth delete removes a saved platform by alias", async () => {
   store.setPlatformAlias("https://dip.aishu.cn", "dip");
   store.setCurrentPlatform("https://dip.aishu.cn");
 
-  store.saveClientConfig({
+  store.saveTokenConfig({
     baseUrl: "https://adp.aishu.cn",
-    clientId: "client-b",
-    clientSecret: "secret-b",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
+    accessToken: "token-b",
+    tokenType: "bearer",
     scope: "openid offline all",
+    obtainedAt: "2026-03-11T00:00:00.000Z",
   });
 
   assert.equal(await auth.runAuthCommand(["delete", "dip"]), 0);
@@ -440,19 +234,11 @@ test("run auth delete removes a saved platform by alias", async () => {
   assert.equal(store.getCurrentPlatform(), "https://adp.aishu.cn");
 });
 
-test("run auth logout clears token and callback but keeps client config", async () => {
+test("run auth logout clears token for current platform", async () => {
   const configDir = createConfigDir();
   const store = await importStoreModule(configDir);
   const auth = await importAuthModule(configDir);
 
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "client-a",
-    clientSecret: "secret-a",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-    scope: "openid offline all",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-a",
@@ -460,65 +246,14 @@ test("run auth logout clears token and callback but keeps client config", async 
     scope: "openid offline all",
     obtainedAt: "2026-03-11T00:00:00.000Z",
   });
-  store.saveCallbackSession({
-    baseUrl: "https://dip.aishu.cn",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    code: "code-1",
-    state: "state-1",
-    receivedAt: "2026-03-11T00:00:00.000Z",
-  });
   store.setCurrentPlatform("https://dip.aishu.cn");
 
   assert.equal(store.loadTokenConfig("https://dip.aishu.cn")?.accessToken, "token-a");
-  assert.equal(store.loadCallbackSession("https://dip.aishu.cn")?.code, "code-1");
 
   assert.equal(await auth.runAuthCommand(["logout"]), 0);
 
-  assert.equal(store.hasPlatform("https://dip.aishu.cn"), true);
-  assert.equal(store.loadClientConfig("https://dip.aishu.cn")?.clientId, "client-a");
   assert.equal(store.loadTokenConfig("https://dip.aishu.cn"), null);
-  assert.equal(store.loadCallbackSession("https://dip.aishu.cn"), null);
   assert.equal(store.getCurrentPlatform(), "https://dip.aishu.cn");
-});
-
-test("formatAuthStatusSummary includes platform token and callback details", () => {
-  const lines = formatAuthStatusSummary({
-    client: {
-      baseUrl: "https://dip.aishu.cn",
-      clientId: "client-123",
-      clientSecret: "secret-123",
-      redirectUri: "http://127.0.0.1:9010/callback",
-      logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-      scope: "openid offline all",
-      lang: "zh-cn",
-      product: "adp",
-      xForwardedPrefix: "",
-    },
-    token: {
-      baseUrl: "https://dip.aishu.cn",
-      accessToken: "token-123",
-      tokenType: "bearer",
-      scope: "openid offline all",
-      expiresAt: "2026-03-10T12:00:00.000Z",
-      obtainedAt: "2026-03-10T11:00:00.000Z",
-    },
-    callback: {
-      baseUrl: "https://dip.aishu.cn",
-      redirectUri: "http://127.0.0.1:9010/callback",
-      code: "code-123",
-      state: "state-123",
-      scope: "openid offline all",
-      receivedAt: "2026-03-10T11:05:00.000Z",
-    },
-    isCurrent: true,
-  });
-
-  assert.ok(lines.includes("Platform: https://dip.aishu.cn"));
-  assert.ok(lines.includes("Current platform: yes"));
-  assert.ok(lines.includes("Token present: yes"));
-  assert.ok(lines.includes("Callback recorded: yes"));
-  assert.ok(lines.includes("Last callback at: 2026-03-10T11:05:00.000Z"));
-  assert.ok(lines.includes("Last callback scope: openid offline all"));
 });
 
 test("formatHttpError expands network request failures with url and cause", () => {
@@ -548,13 +283,6 @@ test("formatHttpError formats OAuth invalid_grant with readable hint", () => {
   assert.ok(message.startsWith("HTTP 400 Bad Request"));
   assert.ok(message.includes("OAuth error: invalid_grant"));
   assert.ok(message.includes("Run `kweaver auth <platform-url>` again to log in"));
-});
-
-test("getAuthorizationSuccessMessage tells the user to close the page", () => {
-  assert.equal(
-    getAuthorizationSuccessMessage(),
-    "Authorization succeeded. You can close this page and return to the terminal."
-  );
 });
 
 test("formatCallOutput pretty prints json when requested", () => {

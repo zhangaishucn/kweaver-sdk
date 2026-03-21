@@ -172,10 +172,8 @@ export { HttpError, NetworkRequestError, fetchTextOrThrow } from "./utils/http.j
 
 // ── Config / credential store (read-only helpers) ─────────────────────────────
 export type {
-  ClientConfig,
   TokenConfig,
   ContextLoaderEntry,
   ContextLoaderConfig,
-  PlatformSummary,
 } from "./config/store.js";
 export { getConfigDir, getCurrentPlatform } from "./config/store.js";

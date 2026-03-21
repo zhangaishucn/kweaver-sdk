@@ -11,18 +11,6 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export interface ClientConfig {
-  baseUrl: string;
-  clientId: string;
-  clientSecret: string;
-  redirectUri: string;
-  logoutRedirectUri: string;
-  scope: string;
-  lang?: string;
-  product?: string;
-  xForwardedPrefix?: string;
-}
-
 export interface TokenConfig {
   baseUrl: string;
   accessToken: string;
@@ -33,15 +21,6 @@ export interface TokenConfig {
   refreshToken?: string;
   idToken?: string;
   obtainedAt: string;
-}
-
-export interface CallbackSession {
-  baseUrl: string;
-  redirectUri: string;
-  code: string;
-  state: string;
-  scope?: string;
-  receivedAt: string;
 }
 
 /** Single context-loader entry (named kn_id). */
@@ -166,9 +145,9 @@ function migrateLegacyFilesIfNeeded(): void {
     return;
   }
 
-  const legacyClient = readJsonFile<ClientConfig>(legacyClientFile);
+  const legacyClient = readJsonFile<{ baseUrl?: string }>(legacyClientFile);
   const legacyToken = readJsonFile<TokenConfig>(legacyTokenFile);
-  const legacyCallback = readJsonFile<CallbackSession>(legacyCallbackFile);
+  const legacyCallback = readJsonFile<{ baseUrl?: string }>(legacyCallbackFile);
   const baseUrl = legacyClient?.baseUrl ?? legacyToken?.baseUrl ?? legacyCallback?.baseUrl;
 
   if (!baseUrl) {
@@ -284,21 +263,6 @@ export function resolvePlatformIdentifier(value: string): string | null {
   return normalized;
 }
 
-export function loadClientConfig(baseUrl?: string): ClientConfig | null {
-  ensureStoreReady();
-  const targetBaseUrl = baseUrl ?? getCurrentPlatform();
-  if (!targetBaseUrl) {
-    return null;
-  }
-  return readJsonFile<ClientConfig>(getPlatformFile(targetBaseUrl, "client.json"));
-}
-
-export function saveClientConfig(config: ClientConfig): void {
-  ensureStoreReady();
-  ensurePlatformDir(config.baseUrl);
-  writeJsonFile(getPlatformFile(config.baseUrl, "client.json"), config);
-}
-
 export function loadTokenConfig(baseUrl?: string): TokenConfig | null {
   ensureStoreReady();
   const targetBaseUrl = baseUrl ?? getCurrentPlatform();
@@ -312,21 +276,6 @@ export function saveTokenConfig(config: TokenConfig): void {
   ensureStoreReady();
   ensurePlatformDir(config.baseUrl);
   writeJsonFile(getPlatformFile(config.baseUrl, "token.json"), config);
-}
-
-export function loadCallbackSession(baseUrl?: string): CallbackSession | null {
-  ensureStoreReady();
-  const targetBaseUrl = baseUrl ?? getCurrentPlatform();
-  if (!targetBaseUrl) {
-    return null;
-  }
-  return readJsonFile<CallbackSession>(getPlatformFile(targetBaseUrl, "callback.json"));
-}
-
-export function saveCallbackSession(session: CallbackSession): void {
-  ensureStoreReady();
-  ensurePlatformDir(session.baseUrl);
-  writeJsonFile(getPlatformFile(session.baseUrl, "callback.json"), session);
 }
 
 /** Legacy format (pre-refactor). */

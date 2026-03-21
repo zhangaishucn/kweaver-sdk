@@ -19,14 +19,6 @@ test("store saves multiple platforms and switches current platform", async () =>
   const configDir = createStoreDir();
   const store = await importStoreModule(configDir);
 
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "client-a",
-    clientSecret: "secret-a",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-    scope: "openid offline all",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-a",
@@ -36,14 +28,6 @@ test("store saves multiple platforms and switches current platform", async () =>
   });
   store.setCurrentPlatform("https://dip.aishu.cn");
 
-  store.saveClientConfig({
-    baseUrl: "https://adp.aishu.cn",
-    clientId: "client-b",
-    clientSecret: "secret-b",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-    scope: "openid offline all",
-  });
   store.saveTokenConfig({
     baseUrl: "https://adp.aishu.cn",
     accessToken: "token-b",
@@ -53,13 +37,13 @@ test("store saves multiple platforms and switches current platform", async () =>
   });
 
   assert.equal(store.getCurrentPlatform(), "https://dip.aishu.cn");
-  assert.equal(store.loadClientConfig("https://dip.aishu.cn")?.clientId, "client-a");
-  assert.equal(store.loadClientConfig("https://adp.aishu.cn")?.clientId, "client-b");
+  assert.equal(store.loadTokenConfig("https://dip.aishu.cn")?.accessToken, "token-a");
+  assert.equal(store.loadTokenConfig("https://adp.aishu.cn")?.accessToken, "token-b");
 
   store.setCurrentPlatform("https://adp.aishu.cn");
 
   assert.equal(store.getCurrentPlatform(), "https://adp.aishu.cn");
-  assert.equal(store.loadClientConfig()?.baseUrl, "https://adp.aishu.cn");
+  assert.equal(store.loadTokenConfig()?.baseUrl, "https://adp.aishu.cn");
 
   const platforms = store.listPlatforms();
   assert.equal(platforms.length, 2);
@@ -80,14 +64,6 @@ test("store supports aliases and resolves them to platform urls", async () => {
   const configDir = createStoreDir();
   const store = await importStoreModule(configDir);
 
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "client-a",
-    clientSecret: "secret-a",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-    scope: "openid offline all",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-a",
@@ -101,15 +77,6 @@ test("store supports aliases and resolves them to platform urls", async () => {
   assert.equal(store.resolvePlatformIdentifier("dip"), "https://dip.aishu.cn");
   assert.equal(store.resolvePlatformIdentifier("https://dip.aishu.cn"), "https://dip.aishu.cn");
 
-  store.saveClientConfig({
-    baseUrl: "https://adp.aishu.cn",
-    clientId: "client-b",
-    clientSecret: "secret-b",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-    scope: "openid offline all",
-  });
-
   assert.throws(
     () => store.setPlatformAlias("https://adp.aishu.cn", "dip"),
     /already assigned/
@@ -120,14 +87,6 @@ test("store deletes platform data aliases and resets current platform", async ()
   const configDir = createStoreDir();
   const store = await importStoreModule(configDir);
 
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "client-a",
-    clientSecret: "secret-a",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-    scope: "openid offline all",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-a",
@@ -138,14 +97,6 @@ test("store deletes platform data aliases and resets current platform", async ()
   store.setPlatformAlias("https://dip.aishu.cn", "dip");
   store.setCurrentPlatform("https://dip.aishu.cn");
 
-  store.saveClientConfig({
-    baseUrl: "https://adp.aishu.cn",
-    clientId: "client-b",
-    clientSecret: "secret-b",
-    redirectUri: "http://127.0.0.1:9010/callback",
-    logoutRedirectUri: "http://127.0.0.1:9010/successful-logout",
-    scope: "openid offline all",
-  });
   store.saveTokenConfig({
     baseUrl: "https://adp.aishu.cn",
     accessToken: "token-b",
@@ -202,9 +153,7 @@ test("store migrates legacy single-platform files automatically", async () => {
   const store = await importStoreModule(configDir);
 
   assert.equal(store.getCurrentPlatform(), "https://dip.aishu.cn");
-  assert.equal(store.loadClientConfig()?.clientId, "legacy-client");
   assert.equal(store.loadTokenConfig()?.accessToken, "legacy-token");
-  assert.equal(store.loadCallbackSession()?.code, "legacy-code");
   assert.deepEqual(
     store.listPlatforms().map(
       (item: { baseUrl: string; hasToken: boolean; isCurrent: boolean; alias?: string }) => ({
@@ -222,14 +171,6 @@ test("store saves and loads context-loader config per platform", async () => {
   const configDir = createStoreDir();
   const store = await importStoreModule(configDir);
 
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "c",
-    clientSecret: "s",
-    redirectUri: "http://127.0.0.1:9010/cb",
-    logoutRedirectUri: "http://127.0.0.1:9010/logout",
-    scope: "openid",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-x",
@@ -255,13 +196,12 @@ test("store saves and loads context-loader config per platform", async () => {
   assert.equal(kn.mcpUrl, "https://dip.aishu.cn/api/agent-retrieval/v1/mcp");
   assert.equal(kn.knId, "kn-123");
 
-  store.saveClientConfig({
+  store.saveTokenConfig({
     baseUrl: "https://adp.aishu.cn",
-    clientId: "c2",
-    clientSecret: "s2",
-    redirectUri: "http://127.0.0.1:9010/cb",
-    logoutRedirectUri: "http://127.0.0.1:9010/logout",
-    scope: "openid",
+    accessToken: "token-y",
+    tokenType: "bearer",
+    scope: "",
+    obtainedAt: "2026-03-11T00:00:00.000Z",
   });
   store.setCurrentPlatform("https://adp.aishu.cn");
 
@@ -281,14 +221,6 @@ test("store context-loader supports multiple configs and switch", async () => {
   const configDir = createStoreDir();
   const store = await importStoreModule(configDir);
 
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "c",
-    clientSecret: "s",
-    redirectUri: "http://127.0.0.1:9010/cb",
-    logoutRedirectUri: "http://127.0.0.1:9010/logout",
-    scope: "openid",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-x",
@@ -317,14 +249,6 @@ test("store context-loader migrates legacy format", async () => {
   const configDir = createStoreDir();
   const store = await importStoreModule(configDir);
 
-  store.saveClientConfig({
-    baseUrl: "https://dip.aishu.cn",
-    clientId: "c",
-    clientSecret: "s",
-    redirectUri: "http://127.0.0.1:9010/cb",
-    logoutRedirectUri: "http://127.0.0.1:9010/logout",
-    scope: "openid",
-  });
   store.saveTokenConfig({
     baseUrl: "https://dip.aishu.cn",
     accessToken: "token-x",
