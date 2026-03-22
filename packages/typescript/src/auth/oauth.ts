@@ -1,8 +1,10 @@
 import {
+  type ClientConfig,
   type TokenConfig,
   getCurrentPlatform,
   loadClientConfig,
   loadTokenConfig,
+  saveClientConfig,
   saveTokenConfig,
   setCurrentPlatform,
 } from "../config/store.js";
@@ -13,10 +15,204 @@ const TOKEN_TTL_SECONDS = 3600;
 /** Seconds before access token expiry to trigger refresh (matches Python ConfigAuth). */
 const REFRESH_THRESHOLD_SEC = 60;
 
+const DEFAULT_REDIRECT_PORT = 9010;
+const DEFAULT_SCOPE = "openid offline all";
+
 export function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+/**
+ * OAuth2 Authorization Code login flow.
+ * 1. Register client (if not already registered)
+ * 2. Open browser to /oauth2/auth
+ * 3. Receive authorization code via local HTTP callback
+ * 4. Exchange code for access_token + refresh_token
+ * 5. Save token.json + client.json to ~/.kweaver/
+ */
+export async function oauth2Login(
+  baseUrl: string,
+  options?: { port?: number; scope?: string },
+): Promise<TokenConfig> {
+  const { createServer } = await import("node:http");
+  const { randomBytes } = await import("node:crypto");
+
+  const base = normalizeBaseUrl(baseUrl);
+  const port = options?.port ?? DEFAULT_REDIRECT_PORT;
+  const scope = options?.scope ?? DEFAULT_SCOPE;
+  const redirectUri = `http://127.0.0.1:${port}/callback`;
+
+  // Step 1: Ensure registered client
+  let client = loadClientConfig(base);
+  if (!client?.clientId) {
+    client = await registerOAuth2Client(base, redirectUri, scope);
+    saveClientConfig(base, client);
+  }
+
+  // Step 2: Generate CSRF state
+  const state = randomBytes(12).toString("hex");
+
+  // Step 3: Build authorization URL
+  const authParams = new URLSearchParams({
+    redirect_uri: redirectUri,
+    "x-forwarded-prefix": "",
+    client_id: client.clientId,
+    scope,
+    response_type: "code",
+    state,
+    lang: "zh-cn",
+    product: "adp",
+  });
+  const authUrl = `${base}/oauth2/auth?${authParams.toString()}`;
+
+  // Step 4: Start local callback server, wait for code
+  const code = await new Promise<string>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      server.close();
+      reject(new Error("OAuth2 login timed out (120s). No authorization code received."));
+    }, 120_000);
+
+    const server = createServer((req, res) => {
+      const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+      if (url.pathname === "/callback") {
+        const receivedState = url.searchParams.get("state");
+        const receivedCode = url.searchParams.get("code");
+
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end("<html><body><h2>Login successful. You can close this tab.</h2></body></html>");
+
+        clearTimeout(timeoutId);
+        server.close();
+
+        if (receivedState !== state) {
+          reject(new Error("OAuth2 state mismatch — possible CSRF attack."));
+        } else if (!receivedCode) {
+          reject(new Error("No authorization code received in callback."));
+        } else {
+          resolve(receivedCode);
+        }
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    server.listen(port, "127.0.0.1", () => {
+      // Step 5: Open browser
+      import("node:child_process").then(({ exec }) => {
+        const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+        exec(`${cmd} "${authUrl}"`);
+      });
+    });
+  });
+
+  // Step 6: Exchange code for tokens
+  const token = await exchangeCodeForToken(base, code, client.clientId, client.clientSecret, redirectUri);
+
+  setCurrentPlatform(base);
+  return token;
+}
+
+async function registerOAuth2Client(baseUrl: string, redirectUri: string, scope: string): Promise<ClientConfig> {
+  const logoutUri = redirectUri.replace("/callback", "/successful-logout");
+
+  const response = await fetch(`${baseUrl}/oauth2/clients`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      client_name: "kweaver-sdk",
+      grant_types: ["authorization_code", "implicit", "refresh_token"],
+      response_types: ["token id_token", "code", "token"],
+      scope: "openid offline all",
+      redirect_uris: [redirectUri],
+      post_logout_redirect_uris: [logoutUri],
+      metadata: {
+        device: {
+          name: "kweaver-sdk",
+          client_type: "web",
+          description: "KWeaver TypeScript SDK",
+        },
+      },
+    }),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new HttpError(response.status, response.statusText, text);
+  }
+
+  const data = JSON.parse(text) as { client_id: string; client_secret: string };
+  return {
+    baseUrl,
+    clientId: data.client_id,
+    clientSecret: data.client_secret,
+    redirectUri,
+    logoutRedirectUri: logoutUri,
+    scope,
+    lang: "zh-cn",
+    product: "adp",
+    xForwardedPrefix: "",
+  };
+}
+
+async function exchangeCodeForToken(
+  baseUrl: string,
+  code: string,
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string,
+): Promise<TokenConfig> {
+  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+
+  const response = await fetch(`${baseUrl}/oauth2/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+    }).toString(),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new HttpError(response.status, response.statusText, text);
+  }
+
+  const data = JSON.parse(text) as {
+    access_token: string;
+    token_type?: string;
+    scope?: string;
+    expires_in?: number;
+    refresh_token?: string;
+    id_token?: string;
+  };
+
+  const now = new Date();
+  const expiresIn = typeof data.expires_in === "number" ? data.expires_in : 3600;
+  const token: TokenConfig = {
+    baseUrl,
+    accessToken: data.access_token,
+    tokenType: data.token_type ?? "Bearer",
+    scope: data.scope ?? "",
+    expiresIn,
+    expiresAt: new Date(now.getTime() + expiresIn * 1000).toISOString(),
+    refreshToken: data.refresh_token ?? "",
+    idToken: data.id_token ?? "",
+    obtainedAt: now.toISOString(),
+  };
+  saveTokenConfig(token);
+  return token;
+}
+
+/**
+ * Playwright cookie login (legacy fallback).
+ * Does NOT produce a refresh_token — token expires in 1 hour with no auto-refresh.
+ */
 export async function playwrightLogin(
   baseUrl: string,
   options?: { username?: string; password?: string },

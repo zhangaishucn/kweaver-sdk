@@ -14,6 +14,7 @@ import {
 import {
   formatHttpError,
   normalizeBaseUrl,
+  oauth2Login,
   playwrightLogin,
 } from "../auth/oauth.js";
 
@@ -47,15 +48,23 @@ kweaver auth delete <url>    Delete saved credentials`);
       const alias = readOption(args, "--alias");
       const username = readOption(args, "--username") ?? readOption(args, "-u");
       const password = readOption(args, "--password") ?? readOption(args, "-p");
+      const usePlaywright = args.includes("--playwright");
+
+      let token;
 
       if (username && password) {
+        // Headless Playwright login with credentials
         console.log("Logging in (headless)...");
+        token = await playwrightLogin(normalizedTarget, { username, password });
+      } else if (usePlaywright) {
+        // Explicit Playwright fallback
+        console.log("Opening browser for login (Playwright)...");
+        token = await playwrightLogin(normalizedTarget);
       } else {
-        console.log("Opening browser for login...");
+        // Default: OAuth2 authorization code flow (supports refresh_token)
+        console.log("Opening browser for OAuth2 login...");
+        token = await oauth2Login(normalizedTarget);
       }
-      const token = await playwrightLogin(normalizedTarget,
-        username && password ? { username, password } : undefined,
-      );
 
       if (alias) {
         setPlatformAlias(normalizedTarget, alias);
@@ -72,6 +81,11 @@ kweaver auth delete <url>    Delete saved credentials`);
       }
       console.log(`Current platform: ${normalizedTarget}`);
       console.log(`Access token saved: yes`);
+      if (token.refreshToken) {
+        console.log(`Refresh token: yes (auto-refresh enabled)`);
+      } else {
+        console.log(`Refresh token: no (token will expire in 1 hour)`);
+      }
       if (token.expiresAt) {
         console.log(`Token expires at: ${token.expiresAt}`);
       }
@@ -109,12 +123,16 @@ kweaver auth delete <url>    Delete saved credentials`);
       `Token present: yes`,
     ];
 
+    lines.push(`Refresh token: ${token.refreshToken ? "yes (auto-refresh enabled)" : "no"}`);
+
     if (token.expiresAt) {
       const expiry = new Date(token.expiresAt);
       const remainingMs = expiry.getTime() - Date.now();
       if (remainingMs > 0) {
         const remainingMin = Math.ceil(remainingMs / 60_000);
         lines.push(`Token status: active (expires in ${remainingMin} min)`);
+      } else if (token.refreshToken) {
+        lines.push(`Token status: expired (will auto-refresh on next command)`);
       } else {
         lines.push(`Token status: expired (run \`kweaver auth login ${token.baseUrl}\` again)`);
       }
