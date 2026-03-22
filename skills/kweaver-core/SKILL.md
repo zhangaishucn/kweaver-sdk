@@ -1,5 +1,5 @@
 ---
-name: kweaver
+name: kweaver-core
 description: >-
   操作 KWeaver 知识网络与 Decision Agent — 构建知识网络、查询 Schema/实例、
   语义搜索、执行 Action、Agent CRUD 与对话。
