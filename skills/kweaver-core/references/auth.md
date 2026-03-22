@@ -22,9 +22,10 @@ kweaver auth delete <platform> [-y]              # 删除平台凭证
 
 ## 说明
 
-- `login` 通过 Playwright headless 浏览器完成登录，提取平台 token
-- Token 有效期 1 小时，过期后需重新 `auth login`
-- 不支持自动刷新
+- `login` 支持两种方式：
+  - **OAuth2 授权码登录**（默认，平台支持时）：获取 `access_token` + `refresh_token`，**支持自动刷新**，token 过期时 CLI 自动用 refresh_token 换取新 token
+  - **Playwright cookie 登录**（回退方式）：通过 headless 浏览器提取 cookie token，**不支持自动刷新**，过期后需重新 `auth login`
+- Token 有效期 1 小时
 - 支持多平台，用 `--alias` 设置短名称方便切换
 
 ## 示例
