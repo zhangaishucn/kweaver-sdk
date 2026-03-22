@@ -64,4 +64,6 @@ kweaver context-loader get-action-info '{"at_id": "at-1", "_instance_identity": 
 }
 ```
 
-支持的 operation: `==`, `!=`, `>`, `<`, `>=`, `<=`, `in`, `not_in`, `match`（全文检索）
+支持的 operation: `==`, `!=`, `>`, `<`, `>=`, `<=`, `in`, `not_in`, `like`（模糊匹配）
+
+> **注意**：`match`（全文检索）仅在 OpenSearch 索引模式下可用，SQL 视图数据源会返回 500 错误。优先使用 `like` 做文本模糊匹配。`eq`、`gt`、`lt` 等不是合法操作符，请用 `==`、`>`、`<`。
