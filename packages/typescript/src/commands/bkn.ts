@@ -647,25 +647,34 @@ function truncateQueryResult(raw: string): string {
     datas.pop();
     const candidate = JSON.stringify(parsed);
     if (candidate.length <= MAX_OUTPUT_BYTES) {
+      const remaining = originalCount - datas.length;
+      const sa = parsed.search_after;
       parsed._truncated = {
         returned: datas.length,
         total_fetched: originalCount,
-        message: `Output exceeded ${Math.round(MAX_OUTPUT_BYTES / 1024)}KB. Use search_after to fetch remaining records.`,
+        remaining,
+        next_search_after: sa ?? null,
+        hint: sa
+          ? `Pass --search-after '${JSON.stringify(sa)}' --limit ${datas.length} to fetch the next page.`
+          : `Reduce --limit to ${datas.length} or less to avoid truncation.`,
       };
       console.error(
-        `[warn] Truncated ${originalCount} → ${datas.length} records (output exceeded ${Math.round(MAX_OUTPUT_BYTES / 1024)}KB). Use --search-after to paginate.`
+        `[warn] Truncated ${originalCount} → ${datas.length} records (output exceeded ${Math.round(MAX_OUTPUT_BYTES / 1024)}KB). ${(parsed._truncated as { hint: string }).hint}`
       );
       return JSON.stringify(parsed);
     }
   }
 
+  const sa = parsed.search_after;
   parsed._truncated = {
     returned: 1,
     total_fetched: originalCount,
-    message: `Output exceeded ${Math.round(MAX_OUTPUT_BYTES / 1024)}KB. Use search_after with a smaller --limit.`,
+    remaining: originalCount - 1,
+    next_search_after: sa ?? null,
+    hint: `Single record is very large. Use --limit 1 and --search-after to iterate.`,
   };
   console.error(
-    `[warn] Truncated ${originalCount} → 1 record (output exceeded ${Math.round(MAX_OUTPUT_BYTES / 1024)}KB). Use a smaller --limit.`
+    `[warn] Truncated ${originalCount} → 1 record. Single record is very large. Use --limit 1 and --search-after to iterate.`
   );
   return JSON.stringify(parsed);
 }
