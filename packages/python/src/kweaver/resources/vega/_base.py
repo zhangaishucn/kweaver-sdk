@@ -21,7 +21,10 @@ class VegaModelResource(Generic[T]):
 
     def get(self, id: str) -> T:
         data = self._http.get(f"{self._path}/{id}")
-        if isinstance(data, dict) and "entries" in data:
+        # Backend may return [item] or {entries: [item]} or {item}
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        elif isinstance(data, dict) and "entries" in data:
             data = data["entries"][0] if data["entries"] else data
         return self._parse(data)
 

@@ -42,7 +42,7 @@ def created_agent(kweaver_client: KWeaverClient, llm_model: dict[str, str]) -> d
     """Create an agent for the test module; delete it at teardown."""
     config: dict[str, Any] = {
         "input": {"fields": [{"name": "user_input", "type": "string", "desc": ""}]},
-        "output": {},
+        "output": {"default_format": "markdown"},
         "system_prompt": "你是一个 SDK 集成测试助手",
         "llms": [{
             "is_default": True,

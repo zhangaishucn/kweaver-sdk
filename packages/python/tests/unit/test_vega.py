@@ -280,7 +280,7 @@ _SERVER_INFO = {
 def test_health_returns_server_info():
     """health() GETs /health and returns a VegaServerInfo."""
     def handler(req):
-        assert req.url.path == "/health"
+        assert req.url.path == "/api/vega-backend/v1/health"
         return httpx.Response(200, json=_SERVER_INFO)
 
     from kweaver.resources.vega import VegaNamespace
@@ -304,7 +304,7 @@ def test_inspect_returns_report():
 
     def handler(req):
         path = req.url.path
-        if path == "/health":
+        if path == "/api/vega-backend/v1/health":
             return httpx.Response(200, json=_SERVER_INFO)
         if path == "/api/vega-backend/v1/catalogs":
             return httpx.Response(200, json={"entries": [_catalog]})
@@ -326,7 +326,7 @@ def test_inspect_partial_failure_still_returns_report():
     """inspect() returns a partial report when health endpoint fails."""
     def handler(req):
         path = req.url.path
-        if path == "/health":
+        if path == "/api/vega-backend/v1/health":
             return httpx.Response(500, json={"error": "internal server error"})
         if path == "/api/vega-backend/v1/catalogs":
             return httpx.Response(200, json={"entries": []})
@@ -509,15 +509,14 @@ def test_client_vega_property():
     from kweaver.resources.vega import VegaNamespace
     assert isinstance(client.vega, VegaNamespace)
 
-def test_client_vega_raises_without_url():
-    """client.vega should raise ValueError when vega_url not configured."""
+def test_client_vega_falls_back_to_base_url():
+    """client.vega should fall back to base_url when vega_url not configured."""
     def handler(req):
         return httpx.Response(200, json={})
     transport = httpx.MockTransport(handler)
     client = KWeaverClient(base_url="https://mock", token="tok", transport=transport)
-    import pytest
-    with pytest.raises(ValueError, match="vega_url"):
-        _ = client.vega
+    from kweaver.resources.vega import VegaNamespace
+    assert isinstance(client.vega, VegaNamespace)
 
 
 # ── Missing Vega resource method tests ──

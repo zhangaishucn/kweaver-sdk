@@ -21,20 +21,31 @@ import pytest
 from kweaver import KWeaverClient, PasswordAuth
 
 # ---------------------------------------------------------------------------
-# Auto-load secrets from ~/.env.secrets (same pattern as Alfred)
+# Auto-load secrets: local .env.e2e first, then ~/.env.secrets as fallback
 # ---------------------------------------------------------------------------
 
-_SECRETS_PATH = Path.home() / ".env.secrets"
+# Walk up from this file to find the repo root (contains .git)
+def _find_repo_root() -> Path | None:
+    d = Path(__file__).resolve().parent
+    for _ in range(10):
+        if (d / ".git").exists():
+            return d
+        d = d.parent
+    return None
 
-def _load_env_secrets() -> None:
-    """Source KEY=VALUE lines from ~/.env.secrets into os.environ.
+_REPO_ROOT = _find_repo_root()
+_LOCAL_ENV_PATH = _REPO_ROOT / ".env.e2e" if _REPO_ROOT else None
+_GLOBAL_ENV_PATH = Path.home() / ".env.secrets"
+
+def _load_env_file(path: Path) -> None:
+    """Source KEY=VALUE lines from an env file into os.environ.
 
     Handles ``export KEY="VALUE"`` and ``KEY=VALUE`` formats.
     Skips comments and blank lines. Does NOT override existing env vars.
     """
-    if not _SECRETS_PATH.exists():
+    if not path.exists():
         return
-    for line in _SECRETS_PATH.read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -48,7 +59,10 @@ def _load_env_secrets() -> None:
         if key not in os.environ:
             os.environ[key] = value
 
-_load_env_secrets()
+# Local .env.e2e takes priority, then global ~/.env.secrets as fallback
+if _LOCAL_ENV_PATH:
+    _load_env_file(_LOCAL_ENV_PATH)
+_load_env_file(_GLOBAL_ENV_PATH)
 
 
 # ---------------------------------------------------------------------------

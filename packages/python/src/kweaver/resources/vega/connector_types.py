@@ -14,7 +14,7 @@ class VegaConnectorTypesResource:
         self._http = http
 
     def list(self) -> list[VegaConnectorType]:
-        data = self._http.get(self._BASE)
+        data = self._http.get(self._BASE, params={"sort": "name"})
         entries = data.get("entries", data.get("data", [])) if isinstance(data, dict) else data
         return [VegaConnectorType(**e) for e in entries]
 

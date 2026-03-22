@@ -12,7 +12,7 @@ from kweaver.resources.vega.resources import VegaResourcesResource
 from kweaver.resources.vega.connector_types import VegaConnectorTypesResource
 from kweaver.resources.vega.tasks import VegaTasksResource
 from kweaver.types import (
-    VegaServerInfo, VegaPlatformStats, VegaInspectReport, VegaHealthReport,
+    VegaCatalog, VegaServerInfo, VegaPlatformStats, VegaInspectReport, VegaHealthReport,
 )
 
 if TYPE_CHECKING:
@@ -38,7 +38,7 @@ class VegaNamespace:
 
     def health(self) -> VegaServerInfo:
         """Return Vega server info from the /health endpoint."""
-        data = self._http.get("/health")
+        data = self._http.get("/api/vega-backend/v1/health")
         return VegaServerInfo(**data)
 
     def stats(self) -> VegaPlatformStats:
@@ -78,18 +78,20 @@ class VegaNamespace:
         try:
             cats = self.catalogs.list(limit=100)
             catalog_health.catalogs = cats
+            def _hs(c: VegaCatalog) -> str:
+                return c.health_status or c.health_check_status or ""
             catalog_health.healthy_count = sum(
-                1 for c in cats if c.health_status == "healthy"
+                1 for c in cats if _hs(c) == "healthy"
             )
             catalog_health.degraded_count = sum(
-                1 for c in cats if c.health_status == "degraded"
+                1 for c in cats if _hs(c) == "degraded"
             )
             catalog_health.unhealthy_count = sum(
-                1 for c in cats if c.health_status == "unhealthy"
+                1 for c in cats if _hs(c) == "unhealthy"
             )
             catalog_health.offline_count = sum(
                 1 for c in cats
-                if c.health_status not in ("healthy", "degraded", "unhealthy")
+                if _hs(c) not in ("healthy", "degraded", "unhealthy")
             )
         except Exception as exc:
             logger.debug("inspect: failed to fetch catalogs: %s", exc)

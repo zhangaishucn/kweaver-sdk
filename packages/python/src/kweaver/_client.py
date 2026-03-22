@@ -105,16 +105,13 @@ class KWeaverClient:
     def vega(self) -> VegaNamespace:
         """Lazily create and return a VegaNamespace instance.
 
-        Raises ValueError if vega_url was not configured.
+        Falls back to base_url when vega_url is not explicitly configured,
+        which works when Vega API is behind the same gateway as KWeaver.
         """
-        if self._vega_url is None:
-            raise ValueError(
-                "vega_url is required to use the vega namespace. "
-                "Pass vega_url=... to KWeaverClient."
-            )
         if self._vega is None:
+            vega_base = self._vega_url or str(self._http._client.base_url).rstrip("/")
             vega_http = HttpClient(
-                base_url=self._vega_url,
+                base_url=vega_base,
                 auth=self._auth_provider,
                 timeout=self._timeout,
                 transport=self._transport,

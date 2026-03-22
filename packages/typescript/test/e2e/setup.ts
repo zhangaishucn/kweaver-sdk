@@ -8,15 +8,29 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { run } from "../../src/cli.js";
 
-const SECRETS_PATH = join(homedir(), ".env.secrets");
+/** Find repo root by walking up from this file looking for .git */
+function findRepoRoot(): string | null {
+  let dir = dirname(new URL(import.meta.url).pathname);
+  for (let i = 0; i < 10; i += 1) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
 
-function loadEnvSecrets(): void {
-  if (!existsSync(SECRETS_PATH)) return;
-  const content = readFileSync(SECRETS_PATH, "utf-8");
+const REPO_ROOT = findRepoRoot();
+const LOCAL_ENV_PATH = REPO_ROOT ? join(REPO_ROOT, ".env.e2e") : null;
+const GLOBAL_ENV_PATH = join(homedir(), ".env.secrets");
+
+function loadEnvFile(path: string): void {
+  if (!existsSync(path)) return;
+  const content = readFileSync(path, "utf-8");
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
@@ -32,7 +46,9 @@ function loadEnvSecrets(): void {
   }
 }
 
-loadEnvSecrets();
+// Local .env.e2e takes priority, then global ~/.env.secrets as fallback
+if (LOCAL_ENV_PATH) loadEnvFile(LOCAL_ENV_PATH);
+loadEnvFile(GLOBAL_ENV_PATH);
 
 // Remove stale KWEAVER_TOKEN from env so CLI commands fall back to
 // ~/.kweaver/ config which supports auto-refresh via ensureValidToken().

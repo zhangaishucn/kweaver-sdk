@@ -441,14 +441,15 @@ class VegaCatalog(BaseModel):
 
     id: str
     name: str
-    type: str
-    connector_type: str
-    status: str
+    type: str = ""
+    connector_type: str = ""
+    status: str | None = None
     health_status: str | None = None
+    health_check_status: str | None = None
     description: str | None = None
-    creator: str | None = None
-    create_time: str | None = None
-    update_time: str | None = None
+    creator: Any = None
+    create_time: int | str | None = None
+    update_time: int | str | None = None
 
 
 class VegaResourceProperty(BaseModel):
@@ -466,13 +467,13 @@ class VegaResource(BaseModel):
 
     id: str
     name: str
-    catalog_id: str
-    category: str  # table / view / topic / etc.
-    status: str
+    catalog_id: str = ""
+    category: str = ""  # table / view / topic / dataset / etc.
+    status: str = ""
     description: str | None = None
     properties: list[VegaResourceProperty] = []
-    create_time: str | None = None
-    update_time: str | None = None
+    create_time: int | str | None = None
+    update_time: int | str | None = None
 
 
 class VegaConnectorType(BaseModel):
@@ -496,6 +497,9 @@ class VegaMetricModel(BaseModel):
     description: str | None = None
     status: str | None = None
     catalog_id: str | None = None
+    creator: Any = None
+    create_time: int | str | None = None
+    update_time: int | str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -507,6 +511,9 @@ class VegaEventModel(BaseModel):
     description: str | None = None
     status: str | None = None
     catalog_id: str | None = None
+    creator: Any = None
+    create_time: int | str | None = None
+    update_time: int | str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -518,6 +525,9 @@ class VegaTraceModel(BaseModel):
     description: str | None = None
     status: str | None = None
     catalog_id: str | None = None
+    creator: Any = None
+    create_time: int | str | None = None
+    update_time: int | str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -530,6 +540,9 @@ class VegaDataView(BaseModel):
     status: str | None = None
     catalog_id: str | None = None
     fields: list[dict[str, Any]] = []
+    creator: Any = None
+    create_time: int | str | None = None
+    update_time: int | str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -549,6 +562,9 @@ class VegaDataDict(BaseModel):
     description: str | None = None
     status: str | None = None
     items: list[VegaDataDictItem] = []
+    creator: Any = None
+    create_time: int | str | None = None
+    update_time: int | str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -560,6 +576,9 @@ class VegaObjectiveModel(BaseModel):
     description: str | None = None
     status: str | None = None
     catalog_id: str | None = None
+    creator: Any = None
+    create_time: int | str | None = None
+    update_time: int | str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 

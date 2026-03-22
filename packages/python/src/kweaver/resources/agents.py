@@ -112,7 +112,7 @@ class AgentsResource:
         if config is None:
             config = {
                 "input": {"fields": [{"name": "user_input", "type": "string", "desc": ""}]},
-                "output": {},
+                "output": {"default_format": "markdown"},
             }
 
         body: dict[str, Any] = {
