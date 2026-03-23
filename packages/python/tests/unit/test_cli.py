@@ -1335,12 +1335,16 @@ class TestBknPushPull:
         """push validates BKN, generates checksum, packs tar, and uploads."""
         # Create a minimal BKN directory
         (tmp_path / "network.bkn").write_text(
-            "---\ntype: knowledge_network\nid: test\nname: Test\n---\n# Test\n"
+            "---\ntype: knowledge_network\nid: test\nname: Test\n---\n# Test\n",
+            encoding="utf-8",
+            newline="\n",
         )
         ot_dir = tmp_path / "object_types"
         ot_dir.mkdir()
         (ot_dir / "item.bkn").write_text(
-            "---\ntype: object_type\nid: item\nname: Item\n---\n# Item\n"
+            "---\ntype: object_type\nid: item\nname: Item\n---\n# Item\n",
+            encoding="utf-8",
+            newline="\n",
         )
 
         client = _mock_client()
@@ -1355,8 +1359,9 @@ class TestBknPushPull:
         assert "Validated" in result.output or "kn_id" in result.output
         client._http.post_multipart.assert_called_once()
 
-    def test_push_not_a_directory(self, runner):
-        result = runner.invoke(cli, ["bkn", "push", "/nonexistent/dir"])
+    def test_push_not_a_directory(self, runner, tmp_path):
+        missing = tmp_path / "does_not_exist"
+        result = runner.invoke(cli, ["bkn", "push", str(missing)])
         assert result.exit_code != 0
 
     @patch("kweaver.cli.kn.make_client")
@@ -1392,21 +1397,26 @@ class TestBknValidate:
     def test_validate_valid_directory(self, runner, tmp_path):
         """validate succeeds on a well-formed BKN directory."""
         (tmp_path / "network.bkn").write_text(
-            "---\ntype: knowledge_network\nid: test\nname: Test\n---\n# Test\n"
+            "---\ntype: knowledge_network\nid: test\nname: Test\n---\n# Test\n",
+            encoding="utf-8",
+            newline="\n",
         )
         ot_dir = tmp_path / "object_types"
         ot_dir.mkdir()
         (ot_dir / "item.bkn").write_text(
-            "---\ntype: object_type\nid: item\nname: Item\n---\n# Item\n"
+            "---\ntype: object_type\nid: item\nname: Item\n---\n# Item\n",
+            encoding="utf-8",
+            newline="\n",
         )
 
         result = runner.invoke(cli, ["bkn", "validate", str(tmp_path)])
         assert result.exit_code == 0, result.output
         assert "Valid:" in result.output
 
-    def test_validate_not_a_directory(self, runner):
+    def test_validate_not_a_directory(self, runner, tmp_path):
         """validate fails on a non-existent path."""
-        result = runner.invoke(cli, ["bkn", "validate", "/nonexistent/dir"])
+        missing = tmp_path / "does_not_exist"
+        result = runner.invoke(cli, ["bkn", "validate", str(missing)])
         assert result.exit_code != 0
 
     def test_validate_empty_directory(self, runner, tmp_path):
@@ -1421,7 +1431,9 @@ class TestBknValidate:
         ot_dir = tmp_path / "object_types"
         ot_dir.mkdir()
         (ot_dir / "item.bkn").write_text(
-            "---\ntype: object_type\nid: item\nname: Item\n---\n# Item\n"
+            "---\ntype: object_type\nid: item\nname: Item\n---\n# Item\n",
+            encoding="utf-8",
+            newline="\n",
         )
         result = runner.invoke(cli, ["bkn", "validate", str(tmp_path)])
         assert result.exit_code != 0
