@@ -1001,7 +1001,12 @@ export function stripObjectTypeForPut(entry: Record<string, unknown>): Record<st
   return out;
 }
 
-/** Apply merge flags onto a stripped object-type object (mutates copy). */
+/**
+ * Apply merge flags onto a stripped object-type object (mutates copy).
+ * - Add: property `name` not in list → append.
+ * - Update: property `name` exists → replace entry (same as add; CLI also accepts `--update-property`).
+ * - Delete: `--remove-property` removes by `name` before adds are applied.
+ */
 export function applyObjectTypeMerge(
   target: Record<string, unknown>,
   merge: ObjectTypeMergeFields,

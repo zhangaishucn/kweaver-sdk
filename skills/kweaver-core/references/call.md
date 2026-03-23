@@ -5,24 +5,36 @@
 ## 命令
 
 ```bash
-kweaver call <path> [-X <method>] [-d '<json>'] [-H 'Name: Value' ...] [-bd <domain>] [-v]
+kweaver call <url> [-X METHOD] [-H "Name: value"] [-d BODY] [--data-raw BODY]
+             [--url URL] [--pretty] [--verbose] [-bd value]
 ```
+
+（`kweaver curl` 为 `call` 的别名。）
 
 | 参数 | 说明 |
 |------|------|
-| `<path>` | API 路径（如 `/api/ontology-manager/v1/knowledge-networks`） |
-| `-X` | HTTP 方法（默认 GET） |
-| `-d` | JSON 请求体 |
-| `-H` | 额外请求头（可重复） |
-| `-bd` | 覆盖 business domain |
-| `-v` | 打印请求信息到 stderr |
+| `<url>` | API 路径（如 `/api/ontology-manager/v1/knowledge-networks`）；也可用 `--url` 指定 |
+| `--url` | 与位置参数 `<url>` 二选一，显式传入请求路径 |
+| `-X`, `--request` | HTTP 方法（默认 GET） |
+| `-d`, `--data`, `--data-raw` | JSON 请求体；三者等价。提供 body 且未手动设置 `Content-Type` 时，CLI 会设置 **`Content-Type: application/json`** |
+| `-H`, `--header` | 额外请求头（可重复），格式 `Name: value` |
+| `-bd`, `--biz-domain` | 覆盖 `x-business-domain`（默认来自当前平台配置） |
+| `-v`, `--verbose` | 打印请求信息到 stderr |
 | `--pretty` | Pretty-print JSON 输出（默认开启） |
+
+## 注意事项
+
+- 若已通过 `-H 'Content-Type: ...'` 指定 Content-Type，则**不会**被自动覆盖。
+- 若 `-d` / `--data` / `--data-raw` 与 GET 同时使用，方法会自动升级为 **POST**（与 curl 行为一致）。
 
 ## 示例
 
 ```bash
 # GET
 kweaver call /api/ontology-manager/v1/knowledge-networks
+
+# 使用 --url
+kweaver call --url /api/ontology-manager/v1/knowledge-networks
 
 # POST
 kweaver call /api/ontology-manager/v1/knowledge-networks -X POST -d '{"name": "test", "branch": "main"}'
