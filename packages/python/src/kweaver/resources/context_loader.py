@@ -53,6 +53,17 @@ class ContextLoaderResource:
         self._access_token = access_token
         self._kn_id = kn_id
         self._cache_key = f"{self._mcp_url}:{kn_id}"
+        self._client = httpx.Client(follow_redirects=True)
+
+    def close(self) -> None:
+        """Close the underlying HTTP client."""
+        self._client.close()
+
+    def __enter__(self) -> ContextLoaderResource:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
 
     def _build_headers(self, session_id: str | None = None) -> dict[str, str]:
         headers: dict[str, str] = {
@@ -87,15 +98,14 @@ class ContextLoaderResource:
             },
         })
 
-        with httpx.Client(follow_redirects=True) as client:
-            resp = client.post(
-                self._mcp_url,
-                content=init_body,
-                headers=self._build_headers(),
-                timeout=30.0,
-            )
-            if resp.status_code >= 400:
-                raise RuntimeError(f"MCP initialize failed with HTTP {resp.status_code}")
+        resp = self._client.post(
+            self._mcp_url,
+            content=init_body,
+            headers=self._build_headers(),
+            timeout=30.0,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"MCP initialize failed with HTTP {resp.status_code}")
 
         session_id = (
             resp.headers.get("MCP-Session-Id")
@@ -111,13 +121,12 @@ class ContextLoaderResource:
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
         })
-        with httpx.Client(follow_redirects=True) as client:
-            client.post(
-                self._mcp_url,
-                content=notif_body,
-                headers=self._build_headers(session_id),
-                timeout=10.0,
-            )
+        self._client.post(
+            self._mcp_url,
+            content=notif_body,
+            headers=self._build_headers(session_id),
+            timeout=10.0,
+        )
 
         with _cache_lock:
             _session_cache[self._cache_key] = (session_id, time.time())
@@ -133,15 +142,14 @@ class ContextLoaderResource:
         if params:
             body["params"] = params
 
-        with httpx.Client(follow_redirects=True) as client:
-            resp = client.post(
-                self._mcp_url,
-                content=json.dumps(body),
-                headers=self._build_headers(session_id),
-                timeout=60.0,
-            )
-            if resp.status_code >= 400:
-                raise RuntimeError(f"MCP {method} failed with HTTP {resp.status_code}")
+        resp = self._client.post(
+            self._mcp_url,
+            content=json.dumps(body),
+            headers=self._build_headers(session_id),
+            timeout=60.0,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"MCP {method} failed with HTTP {resp.status_code}")
 
         parsed = resp.json()
         if error := parsed.get("error"):
@@ -161,15 +169,14 @@ class ContextLoaderResource:
             "id": _next_id(),
         }
 
-        with httpx.Client(follow_redirects=True) as client:
-            resp = client.post(
-                self._mcp_url,
-                content=json.dumps(body),
-                headers=self._build_headers(session_id),
-                timeout=60.0,
-            )
-            if resp.status_code >= 400:
-                raise RuntimeError(f"MCP tools/call '{tool_name}' failed with HTTP {resp.status_code}")
+        resp = self._client.post(
+            self._mcp_url,
+            content=json.dumps(body),
+            headers=self._build_headers(session_id),
+            timeout=60.0,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"MCP tools/call '{tool_name}' failed with HTTP {resp.status_code}")
 
         parsed = resp.json()
 

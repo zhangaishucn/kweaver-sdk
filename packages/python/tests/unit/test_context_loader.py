@@ -112,13 +112,8 @@ def _make_cl(queued: list[dict]) -> tuple[ContextLoaderResource, _MockTransport]
     cl._transport = transport
 
     import httpx as _httpx
-
-    original_client_init = _httpx.Client.__init__
-
     import unittest.mock as _mock
 
-    ctx = _mock.patch("httpx.Client")
-    MockClient = ctx.start()
     instance = _mock.MagicMock()
 
     def fake_post(url, **kwargs):
@@ -126,13 +121,7 @@ def _make_cl(queued: list[dict]) -> tuple[ContextLoaderResource, _MockTransport]
         return transport.handle_request(req)
 
     instance.post.side_effect = fake_post
-    instance.__enter__ = _mock.MagicMock(return_value=instance)
-    instance.__exit__ = _mock.MagicMock(return_value=False)
-    instance.raise_for_status = _mock.MagicMock()
-    MockClient.return_value = instance
-
-    cl._mock_ctx = ctx
-    cl._mock_instance = instance
+    cl._client = instance
     return cl, transport
 
 
@@ -146,7 +135,7 @@ def test_session_initialization():
         cl.kn_search("test")
         assert transport._call_count >= 2
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 def test_session_cached_on_second_call():
@@ -164,7 +153,7 @@ def test_session_cached_on_second_call():
         cl.query_object_instance("ot1", {"operation": "and", "sub_conditions": []})
         assert transport._call_count == 2
     finally:
-        cl._mock_ctx.stop()
+        pass
         _mod._session_cache.clear()
 
 
@@ -183,7 +172,7 @@ def test_kn_search_returns_schema():
         result = cl.kn_search("patient")
         assert result["object_types"][0]["name"] == "Patient"
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 def test_kn_search_only_schema_flag():
@@ -194,7 +183,7 @@ def test_kn_search_only_schema_flag():
         result = cl.kn_search("patient", only_schema=True)
         assert isinstance(result, dict)
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 # ── Layer 2: query_object_instance ────────────────────────────────────────────
@@ -214,7 +203,7 @@ def test_query_object_instance_returns_datas():
         assert len(result["datas"]) == 1
         assert result["datas"][0]["_instance_identity"]["id"] == "p001"
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 # ── Layer 3: get_logic_properties_values ─────────────────────────────────────
@@ -229,7 +218,7 @@ def test_get_logic_properties_raises_on_missing_params():
                 "ot1", "treatment", [{"id": "p001"}], ["treatment_plan"]
             )
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 def test_get_logic_properties_returns_values():
@@ -242,7 +231,7 @@ def test_get_logic_properties_returns_values():
         )
         assert result["properties"]["treatment_plan"] == "insulin therapy"
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 # ── Layer 3: get_action_info ──────────────────────────────────────────────────
@@ -256,7 +245,7 @@ def test_get_action_info_returns_dynamic_tools():
         result = cl.get_action_info("at_prescribe", {"id": "p001"})
         assert result["_dynamic_tools"][0]["name"] == "prescribe"
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 # ── MCP introspection ─────────────────────────────────────────────────────────
@@ -270,7 +259,7 @@ def test_list_tools():
         result = cl.list_tools()
         assert len(result["tools"]) == 2
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 def test_list_resources():
@@ -281,7 +270,7 @@ def test_list_resources():
         result = cl.list_resources()
         assert result["resources"][0]["uri"] == "kn://schema"
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 # ── Error handling ────────────────────────────────────────────────────────────
@@ -294,7 +283,7 @@ def test_rpc_error_raises_runtime_error():
         with pytest.raises(RuntimeError, match="tool not found"):
             cl.kn_search("test")
     finally:
-        cl._mock_ctx.stop()
+        pass
 
 
 def test_missing_session_id_raises():
@@ -308,19 +297,12 @@ def test_missing_session_id_raises():
     cl._kn_id = _KN_ID
     cl._cache_key = f"{_MCP_URL}:{_KN_ID}"
 
-    ctx = _mock.patch("httpx.Client")
-    MockClient = ctx.start()
     instance = _mock.MagicMock()
     no_session_resp = _mock.MagicMock()
     no_session_resp.status_code = 200
     no_session_resp.headers = {}
     instance.post.return_value = no_session_resp
-    instance.__enter__ = _mock.MagicMock(return_value=instance)
-    instance.__exit__ = _mock.MagicMock(return_value=False)
-    MockClient.return_value = instance
+    cl._client = instance
 
-    try:
-        with pytest.raises(RuntimeError, match="MCP-Session-Id"):
-            cl._ensure_session()
-    finally:
-        ctx.stop()
+    with pytest.raises(RuntimeError, match="MCP-Session-Id"):
+        cl._ensure_session()
