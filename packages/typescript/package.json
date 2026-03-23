@@ -1,6 +1,6 @@
 {
   "name": "@kweaver-ai/kweaver-sdk",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "KWeaver TypeScript SDK — CLI tool and programmatic API for knowledge networks and Decision Agents.",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,6 +29,7 @@
     "lint": "tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx --test test/*.test.ts",
     "test:e2e": "node --import tsx test/e2e/ensure-token.ts && node --import tsx --test --test-concurrency=1 test/e2e/**/*.test.ts",
+    "test:e2e:strict": "node test/e2e/run-e2e-strict.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -50,6 +51,7 @@
   "devDependencies": {
     "@types/node": "^24.6.0",
     "@types/react": "^19.2.14",
+    "playwright": "^1.58.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.3"
   },
@@ -63,6 +65,9 @@
   },
   "dependencies": {
     "@kweaver-ai/bkn": "^0.1.0",
+    "@playwright/test": "^1.58.2",
+    "chardet": "^2.1.1",
+    "iconv-lite": "^0.7.2",
     "ink": "^6.8.0",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",

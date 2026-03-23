@@ -55,10 +55,10 @@ Usage:
   kweaver bkn update <kn-id> [options]
   kweaver bkn delete <kn-id> [-y]
   kweaver bkn build <kn-id> [--wait] [--no-wait] [--timeout N]
-  kweaver bkn validate <kn-id>
+  kweaver bkn validate <directory> [--detect-encoding|--no-detect-encoding] [--source-encoding name]
   kweaver bkn export <kn-id>
   kweaver bkn stats <kn-id>
-  kweaver bkn push <directory> [--branch main] [-bd value]
+  kweaver bkn push <directory> [--branch main] [-bd value] [--detect-encoding|--no-detect-encoding] [--source-encoding name]
   kweaver bkn pull <kn-id> [directory] [--branch main] [-bd value]
   kweaver bkn object-type list|get|create|update|delete|query|properties <kn-id> ...
   kweaver bkn relation-type list|get|create|update|delete <kn-id> ...
@@ -169,7 +169,10 @@ function safeExit(code: number): void {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+
+if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   run(process.argv.slice(2))
     .then((code) => {
       safeExit(code);

@@ -7,16 +7,20 @@
  * Priority:
  * 1. ensureValidToken() — uses refresh_token if available
  * 2. playwrightLogin()  — OAuth2 + headless browser (produces refresh_token)
+ *
+ * When E2E_STRICT=1 (or npm run test:e2e:strict), missing KWEAVER_BASE_URL exits 1
+ * instead of skipping token refresh and allowing an all-skipped test run.
  */
 
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { setCurrentPlatform } from "../../src/config/store.js";
 import { ensureValidToken, normalizeBaseUrl, playwrightLogin } from "../../src/auth/oauth.js";
 
 function findRepoRoot(): string | null {
-  let dir = dirname(new URL(import.meta.url).pathname);
+  let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 10; i += 1) {
     if (existsSync(join(dir, ".git"))) return dir;
     const parent = dirname(dir);
@@ -29,7 +33,7 @@ function findRepoRoot(): string | null {
 function loadEnvFile(path: string): void {
   if (!existsSync(path)) return;
   const content = readFileSync(path, "utf-8");
-  for (const line of content.split("\n")) {
+  for (const line of content.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const withoutExport = trimmed.replace(/^export\s+/, "");
@@ -49,7 +53,15 @@ if (REPO_ROOT) loadEnvFile(join(REPO_ROOT, ".env.e2e"));
 loadEnvFile(join(homedir(), ".env.secrets"));
 
 const baseUrl = process.env.KWEAVER_BASE_URL;
+const e2eStrict =
+  process.env.E2E_STRICT === "1" || process.env.E2E_STRICT === "true";
 if (!baseUrl) {
+  if (e2eStrict) {
+    console.error(
+      "[e2e] KWEAVER_BASE_URL is required (repo root .env.e2e or environment). Refusing to run when E2E_STRICT=1.",
+    );
+    process.exit(1);
+  }
   console.log("[e2e] KWEAVER_BASE_URL not set, skipping token refresh");
   process.exit(0);
 }

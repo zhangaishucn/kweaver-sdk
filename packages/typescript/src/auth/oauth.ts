@@ -98,10 +98,9 @@ export async function oauth2Login(
     });
 
     server.listen(port, "127.0.0.1", () => {
-      // Step 5: Open browser
-      import("node:child_process").then(({ exec }) => {
-        const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-        exec(`${cmd} "${authUrl}"`);
+      // Step 5: Open browser (uses spawn with proper Windows quoting)
+      import("../utils/browser.js").then(({ openBrowser }) => {
+        openBrowser(authUrl);
       });
     });
   });

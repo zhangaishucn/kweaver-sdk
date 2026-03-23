@@ -8,7 +8,7 @@ test:
 
 # test-cover: UT + coverage report, output to test-result/
 test-cover:
-	@mkdir -p test-result
+	uv run python -c "import os; os.makedirs('test-result', exist_ok=True)"
 	uv run python -m pytest tests/unit/ \
 		--cov=src/kweaver \
 		--cov-report=term-missing \
@@ -19,9 +19,9 @@ test-cover:
 test-e2e:
 	uv run python -m pytest tests/e2e/ -v --run-destructive
 
-# lint: static type check
+# lint: compile-check all Python sources (cross-platform, no find/tr)
 lint:
-	uv run python -m py_compile $$(find src/kweaver -name "*.py" | tr '\n' ' ')
+	uv run python -m compileall -q src/kweaver
 
 # ci: lint + test-cover
 ci: lint test-cover

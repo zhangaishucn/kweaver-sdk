@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 
 import { KWeaverClient } from "../src/client.js";
 import { ContextLoaderResource } from "../src/resources/context-loader.js";
@@ -15,7 +16,7 @@ function makeClient(extra: Record<string, string> = {}): KWeaverClient {
 
 test("KWeaverClient throws when accessToken missing and env var absent", () => {
   // Point config dir to an empty temp directory so no saved token is found
-  const emptyDir = new URL("../../.tmp-test-cfg", import.meta.url).pathname;
+  const emptyDir = fileURLToPath(new URL("../../.tmp-test-cfg", import.meta.url));
   const origTok = process.env.KWEAVER_TOKEN;
   const origDir = process.env.KWEAVERC_CONFIG_DIR;
   delete process.env.KWEAVER_TOKEN;

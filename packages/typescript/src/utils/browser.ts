@@ -1,26 +1,27 @@
 import { spawn } from "node:child_process";
 
 export function openBrowser(url: string): Promise<boolean> {
-  const command =
-    process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? "cmd"
-        : "xdg-open";
-
-  const args =
-    process.platform === "win32"
-      ? ["/c", "start", "", url]
-      : [url];
+  const isWindows = process.platform === "win32";
+  const command = process.platform === "darwin" ? "open" : isWindows ? "rundll32.exe" : "xdg-open";
+  const args = isWindows
+    ? [
+        "url.dll,FileProtocolHandler",
+        url,
+      ]
+    : [url];
 
   return new Promise((resolve) => {
     const child = spawn(command, args, {
-      detached: true,
       stdio: "ignore",
+      detached: !isWindows,
+      windowsHide: true,
     });
 
-    child.on("error", () => resolve(false));
-    child.unref();
-    resolve(true);
+    child.once("error", () => resolve(false));
+    child.once("spawn", () => resolve(true));
+
+    if (!isWindows) {
+      child.unref();
+    }
   });
 }

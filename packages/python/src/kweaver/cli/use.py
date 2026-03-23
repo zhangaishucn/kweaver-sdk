@@ -14,14 +14,14 @@ def _context_path() -> Path:
 def _read_context() -> dict:
     path = _context_path()
     if path.exists():
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     return {}
 
 
 def _write_context(data: dict) -> None:
     path = _context_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8", newline="\n")
 
 
 @click.command("use")
