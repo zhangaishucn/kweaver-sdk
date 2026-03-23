@@ -157,7 +157,7 @@ Options:
   <url>              API path (e.g. /api/ontology-manager/v1/knowledge-networks)
   -X, --request      HTTP method (default: GET)
   -H, --header       Extra header (repeatable)
-  -d, --data         JSON request body
+  -d, --data, --data-raw   JSON request body (sets Content-Type: application/json if not set)
   -bd, --biz-domain  Override x-business-domain (default: bd_public)
   -v, --verbose      Print request info to stderr
   --pretty           Pretty-print JSON output (default)`);
@@ -182,6 +182,15 @@ Options:
 
     const headers = new Headers(invocation.headers);
     injectAuthHeaders(headers, token.accessToken, invocation.businessDomain);
+
+    if (
+      invocation.body !== undefined &&
+      invocation.body.length > 0 &&
+      !headers.has("content-type") &&
+      !headers.has("Content-Type")
+    ) {
+      headers.set("content-type", "application/json");
+    }
 
     if (invocation.verbose) {
       for (const line of formatVerboseRequest({ ...invocation, url, headers })) {

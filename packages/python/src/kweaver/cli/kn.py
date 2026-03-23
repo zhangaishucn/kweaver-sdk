@@ -14,6 +14,65 @@ import click
 
 from kweaver.cli._helpers import error_exit, handle_errors, make_client, pp
 
+# Object-type PUT: strip read-only fields from GET before merge/re-PUT
+_OBJECT_TYPE_PUT_STRIP_KEYS = frozenset(
+    {"status", "creator", "updater", "create_time", "update_time", "module_type", "kn_id"}
+)
+_PREFIX_OT = "/api/ontology-manager/v1/knowledge-networks"
+
+
+def _strip_object_type_for_put(entry: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in entry.items() if k not in _OBJECT_TYPE_PUT_STRIP_KEYS}
+
+
+def _apply_object_type_merge(
+    target: dict[str, Any],
+    *,
+    name: str | None,
+    display_key: str | None,
+    add_properties: list[dict[str, Any]],
+    remove_properties: tuple[str, ...],
+    tags: list[str] | None,
+    comment: str | None,
+    icon: str | None,
+    color: str | None,
+) -> None:
+    if name is not None:
+        target["name"] = name
+    if display_key is not None:
+        target["display_key"] = display_key
+    if comment is not None:
+        target["comment"] = comment
+    if icon is not None:
+        target["icon"] = icon
+    if color is not None:
+        target["color"] = color
+    if tags is not None:
+        target["tags"] = tags
+
+    props = target.get("data_properties")
+    if not isinstance(props, list):
+        props = []
+    else:
+        props = [dict(p) if isinstance(p, dict) else p for p in props]
+    plist: list[dict[str, Any]] = [p for p in props if isinstance(p, dict)]
+
+    for rm in remove_properties:
+        plist = [p for p in plist if p.get("name") != rm]
+
+    for add in add_properties:
+        nm = add.get("name")
+        if not isinstance(nm, str) or not nm:
+            error_exit('--add-property JSON must include a non-empty string "name" field.')
+        idx = next((i for i, p in enumerate(plist) if p.get("name") == nm), -1)
+        if idx >= 0:
+            plist[idx] = add
+        else:
+            plist.append(add)
+
+    target["data_properties"] = plist
+
+
 # PK/display key heuristics (moved from BuildKnSkill)
 _PK_CANDIDATES = {"id", "pk", "key"}
 _PK_TYPES = {"integer", "unsigned integer", "string", "varchar", "bigint", "int"}
@@ -418,20 +477,129 @@ def object_type_create(
 @object_type_group.command("update")
 @click.argument("kn_id")
 @click.argument("ot_id")
+@click.argument("body_positional", required=False, default=None)
 @click.option("--name", default=None, help="New name.")
 @click.option("--display-key", default=None, help="New display key.")
+@click.option(
+    "--add-property",
+    "add_properties_raw",
+    multiple=True,
+    help="Property as JSON object (repeatable). Merged into schema (GET-merge-PUT).",
+)
+@click.option(
+    "--remove-property",
+    "remove_properties",
+    multiple=True,
+    help="Remove data property by name (repeatable).",
+)
+@click.option("--tags", default=None, help='JSON array of strings, e.g. \'["足球","球员"]\'')
+@click.option("--comment", default=None, help="Replace object type comment.")
+@click.option("--icon", default=None, help="Replace icon id.")
+@click.option("--color", default=None, help="Replace color (e.g. #0e5fc5).")
+@click.option("--branch", default="main", show_default=True, help="Branch for GET/PUT.")
+@click.option(
+    "--body",
+    "body_opt",
+    default=None,
+    help="Full JSON body for PUT (alternative to optional third positional arg).",
+)
 @handle_errors
-def object_type_update(kn_id: str, ot_id: str, name: str | None, display_key: str | None) -> None:
-    """Update an object type."""
-    kwargs: dict[str, Any] = {}
-    if name is not None:
-        kwargs["name"] = name
-    if display_key is not None:
-        kwargs["display_key"] = display_key
-    if not kwargs:
-        error_exit("No update fields provided. Use --name or --display-key.")
+def object_type_update(
+    kn_id: str,
+    ot_id: str,
+    body_positional: str | None,
+    name: str | None,
+    display_key: str | None,
+    add_properties_raw: tuple[str, ...],
+    remove_properties: tuple[str, ...],
+    tags: str | None,
+    comment: str | None,
+    icon: str | None,
+    color: str | None,
+    branch: str,
+    body_opt: str | None,
+) -> None:
+    """Update an object type (merge flags fetch current schema then PUT, or pass full JSON)."""
+    if body_opt is not None and body_positional is not None:
+        error_exit("Use either --body or the optional third argument for full JSON, not both.")
+
+    raw_body = body_opt if body_opt is not None else body_positional
+
+    add_properties: list[dict[str, Any]] = []
+    for raw in add_properties_raw:
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError as e:
+            error_exit(f"Invalid --add-property JSON: {e}")
+        if not isinstance(obj, dict):
+            error_exit("--add-property must be a JSON object.")
+        add_properties.append(obj)
+
+    tags_list: list[str] | None = None
+    if tags is not None:
+        try:
+            t = json.loads(tags)
+        except json.JSONDecodeError as e:
+            error_exit(f"Invalid --tags JSON: {e}")
+        if not isinstance(t, list) or not all(isinstance(x, str) for x in t):
+            error_exit('--tags must be a JSON array of strings, e.g. \'["a","b"]\'')
+        tags_list = t
+
+    has_merge = (
+        name is not None
+        or display_key is not None
+        or len(add_properties) > 0
+        or len(remove_properties) > 0
+        or tags is not None
+        or comment is not None
+        or icon is not None
+        or color is not None
+    )
+
+    if raw_body is not None:
+        s = raw_body.strip()
+        if not s.startswith("{"):
+            error_exit("Full JSON body must be a JSON object starting with '{'.")
+
+        if has_merge:
+            error_exit("Do not combine --body / third-arg JSON with --name, --add-property, and other merge flags.")
+
+        client = make_client()
+        data = json.loads(s)
+        ot = client.object_types.update(kn_id, ot_id, **data)
+        pp(ot.model_dump())
+        return
+
+    if not has_merge:
+        error_exit(
+            "No update fields. Use --name, --display-key, --add-property, --remove-property, "
+            "--tags, --comment, --icon, --color, or pass full JSON as third argument or --body."
+        )
+
     client = make_client()
-    ot = client.object_types.update(kn_id, ot_id, **kwargs)
+    path = f"{_PREFIX_OT}/{kn_id}/object-types/{ot_id}"
+    raw_get = client._http.get(path, params={"branch": branch})
+    if isinstance(raw_get, dict) and "entries" in raw_get:
+        entries = raw_get.get("entries")
+        entry = entries[0] if isinstance(entries, list) and entries else raw_get
+    else:
+        entry = raw_get
+    if not isinstance(entry, dict):
+        error_exit("Unexpected object-type GET response.")
+
+    stripped = _strip_object_type_for_put(entry)
+    _apply_object_type_merge(
+        stripped,
+        name=name,
+        display_key=display_key,
+        add_properties=add_properties,
+        remove_properties=remove_properties,
+        tags=tags_list,
+        comment=comment,
+        icon=icon,
+        color=color,
+    )
+    ot = client.object_types.update(kn_id, ot_id, **stripped)
     pp(ot.model_dump())
 
 

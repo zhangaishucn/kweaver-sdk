@@ -951,18 +951,109 @@ function parseObjectTypeCreateArgs(args: string[]): {
   return { knId, body, businessDomain, branch, pretty };
 }
 
-/** Parse object-type update args: --name X [--display-key Y] */
-function parseObjectTypeUpdateArgs(args: string[]): {
-  knId: string;
-  otId: string;
-  body: string;
-  businessDomain: string;
-  pretty: boolean;
-} {
+/** Fields merged via GET → modify → PUT (not raw body mode). */
+export interface ObjectTypeMergeFields {
+  name?: string;
+  displayKey?: string;
+  addProperties: Record<string, unknown>[];
+  removeProperties: string[];
+  tags?: string[];
+  comment?: string;
+  icon?: string;
+  color?: string;
+}
+
+export type ObjectTypeUpdateParsed =
+  | {
+      mode: "body";
+      knId: string;
+      otId: string;
+      body: string;
+      businessDomain: string;
+      pretty: boolean;
+    }
+  | {
+      mode: "merge";
+      knId: string;
+      otId: string;
+      merge: ObjectTypeMergeFields;
+      businessDomain: string;
+      pretty: boolean;
+      branch: string;
+    };
+
+const OBJECT_TYPE_PUT_STRIP_KEYS = new Set([
+  "status",
+  "creator",
+  "updater",
+  "create_time",
+  "update_time",
+  "module_type",
+  "kn_id",
+]);
+
+/** Prepare a GET response entry for PUT (drop read-only fields). */
+export function stripObjectTypeForPut(entry: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...entry };
+  for (const k of OBJECT_TYPE_PUT_STRIP_KEYS) {
+    delete out[k];
+  }
+  return out;
+}
+
+/** Apply merge flags onto a stripped object-type object (mutates copy). */
+export function applyObjectTypeMerge(
+  target: Record<string, unknown>,
+  merge: ObjectTypeMergeFields,
+): Record<string, unknown> {
+  if (merge.name !== undefined) target.name = merge.name;
+  if (merge.displayKey !== undefined) target.display_key = merge.displayKey;
+  if (merge.comment !== undefined) target.comment = merge.comment;
+  if (merge.icon !== undefined) target.icon = merge.icon;
+  if (merge.color !== undefined) target.color = merge.color;
+  if (merge.tags !== undefined) target.tags = merge.tags;
+
+  let props = target.data_properties;
+  if (!Array.isArray(props)) {
+    props = [];
+  } else {
+    props = props.map((p) =>
+      p && typeof p === "object" && !Array.isArray(p) ? { ...(p as Record<string, unknown>) } : p,
+    );
+  }
+  const list = props as Record<string, unknown>[];
+  for (const rm of merge.removeProperties) {
+    for (let j = list.length - 1; j >= 0; j -= 1) {
+      const n = list[j]?.name;
+      if (typeof n === "string" && n === rm) list.splice(j, 1);
+    }
+  }
+  for (const add of merge.addProperties) {
+    const nm = add.name;
+    if (typeof nm !== "string" || !nm) {
+      throw new Error("--add-property JSON must include a non-empty string \"name\" field.");
+    }
+    const idx = list.findIndex((p) => p?.name === nm);
+    if (idx >= 0) list[idx] = add;
+    else list.push(add);
+  }
+  target.data_properties = list;
+  return target;
+}
+
+/** Parse object-type update: raw JSON body OR merge flags (GET-merge-PUT). */
+function parseObjectTypeUpdateArgs(args: string[]): ObjectTypeUpdateParsed {
   let name: string | undefined;
   let displayKey: string | undefined;
   let businessDomain = "";
   let pretty = true;
+  let branch = "main";
+  let comment: string | undefined;
+  let icon: string | undefined;
+  let color: string | undefined;
+  let tagsJson: string | undefined;
+  const addProperties: Record<string, unknown>[] = [];
+  const removeProperties: string[] = [];
   const positional: string[] = [];
 
   for (let i = 0; i < args.length; i += 1) {
@@ -976,6 +1067,35 @@ function parseObjectTypeUpdateArgs(args: string[]): {
       displayKey = args[++i];
       continue;
     }
+    if (arg === "--add-property" && args[i + 1]) {
+      const raw = args[++i];
+      addProperties.push(parseJsonObject(raw, `--add-property must be valid JSON object: ${raw}`));
+      continue;
+    }
+    if (arg === "--remove-property" && args[i + 1]) {
+      removeProperties.push(args[++i]);
+      continue;
+    }
+    if (arg === "--tags" && args[i + 1]) {
+      tagsJson = args[++i];
+      continue;
+    }
+    if (arg === "--comment" && args[i + 1]) {
+      comment = args[++i];
+      continue;
+    }
+    if (arg === "--icon" && args[i + 1]) {
+      icon = args[++i];
+      continue;
+    }
+    if (arg === "--color" && args[i + 1]) {
+      color = args[++i];
+      continue;
+    }
+    if (arg === "--branch" && args[i + 1]) {
+      branch = args[++i];
+      continue;
+    }
     if ((arg === "-bd" || arg === "--biz-domain") && args[i + 1]) {
       businessDomain = args[++i];
       continue;
@@ -987,18 +1107,85 @@ function parseObjectTypeUpdateArgs(args: string[]): {
     if (!arg.startsWith("-")) positional.push(arg);
   }
 
-  const [knId, otId] = positional;
+  const [knId, otId, maybeBody] = positional;
   if (!knId || !otId) {
-    throw new Error("Usage: kweaver bkn object-type update <kn-id> <ot-id> [--name X] [--display-key Y]");
+    throw new Error(
+      "Usage: kweaver bkn object-type update <kn-id> <ot-id> [ '<full-json-body>' ] [--name ...] [--add-property '<json>' ...]",
+    );
   }
-  const payload: Record<string, string> = {};
-  if (name !== undefined) payload.name = name;
-  if (displayKey !== undefined) payload.display_key = displayKey;
-  if (Object.keys(payload).length === 0) {
-    throw new Error("No update fields. Use --name or --display-key.");
+
+  const hasMergeFlags =
+    name !== undefined ||
+    displayKey !== undefined ||
+    addProperties.length > 0 ||
+    removeProperties.length > 0 ||
+    tagsJson !== undefined ||
+    comment !== undefined ||
+    icon !== undefined ||
+    color !== undefined;
+
+  if (maybeBody !== undefined && maybeBody.trim().startsWith("{")) {
+    if (hasMergeFlags) {
+      throw new Error("Do not combine a raw JSON body with --name/--add-property and other merge flags.");
+    }
+    if (!businessDomain) businessDomain = resolveBusinessDomain();
+    return {
+      mode: "body",
+      knId,
+      otId,
+      body: maybeBody.trim(),
+      businessDomain,
+      pretty,
+    };
   }
+
+  if (maybeBody !== undefined) {
+    throw new Error(
+      `Unexpected third argument "${maybeBody}". For raw PUT body, pass a single JSON object starting with "{".`,
+    );
+  }
+
+  let tags: string[] | undefined;
+  if (tagsJson !== undefined) {
+    try {
+      const t = JSON.parse(tagsJson) as unknown;
+      if (!Array.isArray(t) || !t.every((x) => typeof x === "string")) {
+        throw new Error("invalid");
+      }
+      tags = t;
+    } catch {
+      throw new Error(`--tags must be a JSON array of strings, e.g. '["足球","球员"]'`);
+    }
+  }
+
+  const merge: ObjectTypeMergeFields = {
+    addProperties,
+    removeProperties,
+    ...(name !== undefined ? { name } : {}),
+    ...(displayKey !== undefined ? { displayKey } : {}),
+    ...(tags !== undefined ? { tags } : {}),
+    ...(comment !== undefined ? { comment } : {}),
+    ...(icon !== undefined ? { icon } : {}),
+    ...(color !== undefined ? { color } : {}),
+  };
+
+  if (
+    merge.name === undefined &&
+    merge.displayKey === undefined &&
+    merge.addProperties.length === 0 &&
+    merge.removeProperties.length === 0 &&
+    merge.tags === undefined &&
+    merge.comment === undefined &&
+    merge.icon === undefined &&
+    merge.color === undefined
+  ) {
+    throw new Error(
+      "No update fields. Use --name, --display-key, --add-property, --remove-property, --tags, --comment, --icon, --color, or pass a full JSON object as the third argument.",
+    );
+  }
+
   if (!businessDomain) businessDomain = resolveBusinessDomain();
-  return { knId, otId, body: JSON.stringify(payload), businessDomain, pretty };
+  return { mode: "merge", knId, otId, merge, businessDomain, pretty, branch };
 }
 
 /** Parse object-type delete args: <kn-id> <ot-ids> [-y] */
@@ -1176,14 +1363,15 @@ async function runKnObjectTypeCommand(args: string[]): Promise<number> {
     console.log(`kweaver bkn object-type list <kn-id> [--pretty] [-bd value]
 kweaver bkn object-type get <kn-id> <ot-id> [--pretty] [-bd value]
 kweaver bkn object-type create <kn-id> --name X --dataview-id Y --primary-key Z --display-key W [--property '<json>' ...]
-kweaver bkn object-type update <kn-id> <ot-id> [--name X] [--display-key Y]
+kweaver bkn object-type update <kn-id> <ot-id> [--name X] [--display-key Y] [--add-property '<json>' ...] [--remove-property N ...] [--tags '["a","b"]'] [--comment S] [--icon I] [--color C] [--branch main]
+  kweaver bkn object-type update <kn-id> <ot-id> '<full-json-body>'
 kweaver bkn object-type delete <kn-id> <ot-ids> [-y]
 kweaver bkn object-type query <kn-id> <ot-id> ['<json>'] [--limit <n>] [--search-after '<json-array>'] [--pretty] [-bd value]
 kweaver bkn object-type properties <kn-id> <ot-id> '<json>' [--pretty] [-bd value]
 
 list: List object types (schema) from ontology-manager.
 get: Get single object type details.
-create/update/delete: Schema CRUD (create requires dataview-id).
+create/update/delete: Schema CRUD (create requires dataview-id). update: merge flags (--add-property, etc.) fetch current schema then PUT; or pass full JSON as third arg.
 query: Query via ontology-query API. Default limit is 30 if not specified. Use --search-after for pagination.
 properties: Query instance properties by primary key.
 
@@ -1229,12 +1417,37 @@ properties JSON format: {"_instance_identities":[{"<primary-key>":"<value>"}],"p
     if (action === "update") {
       const opts = parseObjectTypeUpdateArgs(rest);
       const token = await ensureValidToken();
+      let putBody: string;
+      if (opts.mode === "body") {
+        putBody = opts.body;
+      } else {
+        const raw = await getObjectType({
+          baseUrl: token.baseUrl,
+          accessToken: token.accessToken,
+          knId: opts.knId,
+          otId: opts.otId,
+          businessDomain: opts.businessDomain,
+          branch: opts.branch,
+        });
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const entryUnknown = parsed.entries;
+        const entry =
+          Array.isArray(entryUnknown) && entryUnknown.length > 0 && entryUnknown[0] && typeof entryUnknown[0] === "object"
+            ? (entryUnknown[0] as Record<string, unknown>)
+            : parsed;
+        if (!entry || typeof entry !== "object") {
+          throw new Error("Unexpected object-type GET response shape.");
+        }
+        const stripped = stripObjectTypeForPut(entry);
+        applyObjectTypeMerge(stripped, opts.merge);
+        putBody = JSON.stringify(stripped);
+      }
       const body = await updateObjectType({
         baseUrl: token.baseUrl,
         accessToken: token.accessToken,
         knId: opts.knId,
         otId: opts.otId,
-        body: opts.body,
+        body: putBody,
         businessDomain: opts.businessDomain,
       });
       console.log(formatCallOutput(body, opts.pretty));
@@ -1322,7 +1535,8 @@ JSON: {"_instance_identities":[{"<primary-key>":"<value>"}],"properties":["prop1
   } catch (error) {
     if (error instanceof Error && error.message === "help") {
       console.log(`kweaver bkn object-type create <kn-id> --name X --dataview-id Y --primary-key Z --display-key W [--property '<json>' ...]
-kweaver bkn object-type update <kn-id> <ot-id> [--name X] [--display-key Y]
+kweaver bkn object-type update <kn-id> <ot-id> [--name X] [--display-key Y] [--add-property '<json>' ...] [--remove-property N ...] [--tags '["a"]'] [--comment S] [--icon I] [--color C] [--branch main]
+  kweaver bkn object-type update <kn-id> <ot-id> '<full-json-body>'
 kweaver bkn object-type delete <kn-id> <ot-ids> [-y]`);
       return 0;
     }
