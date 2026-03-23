@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
-import subprocess
 import sys
+import tarfile
 import time
 from pathlib import Path
 from typing import Any
@@ -298,23 +299,23 @@ def create_kn(
 
 
 def _pack_bkn_directory_to_tar_bytes(abs_dir: Path) -> bytes:
-    """Pack directory to tar bytes (no ``./`` prefix), aligned with TS ``kweaver bkn push``."""
+    """Pack directory to tar bytes (no ``./`` prefix), aligned with TS ``kweaver bkn push``.
+
+    Uses the standard library :mod:`tarfile` so ``bkn push`` does not depend on a system
+    ``tar`` binary (important on Windows and minimal CI images). On macOS, AppleDouble
+    files (``._*``) are skipped, matching ``COPYFILE_DISABLE=1`` behavior when using ``tar``.
+    """
+    abs_dir = abs_dir.resolve()
     entries = sorted(os.listdir(abs_dir))
+    if sys.platform == "darwin":
+        entries = [e for e in entries if not e.startswith("._")]
     if not entries:
         raise ValueError("BKN directory is empty")
-    env = os.environ.copy()
-    if sys.platform == "darwin":
-        env["COPYFILE_DISABLE"] = "1"
-    proc = subprocess.run(
-        ["tar", "cf", "-", "-C", str(abs_dir), *entries],
-        capture_output=True,
-        env=env,
-        check=False,
-    )
-    if proc.returncode != 0:
-        err = (proc.stderr or proc.stdout or b"").decode(errors="replace").strip()
-        raise RuntimeError(f"tar pack failed (exit {proc.returncode}): {err}")
-    return proc.stdout
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.GNU_FORMAT) as tf:
+        for name in entries:
+            tf.add(abs_dir / name, arcname=name, recursive=True)
+    return buf.getvalue()
 
 
 @kn_group.command("validate")
@@ -350,8 +351,9 @@ def validate_bkn(directory: str) -> None:
 def push_bkn(directory: str, branch: str) -> None:
     """Validate, generate checksum, pack, and upload a BKN directory.
 
-    Uses **kweaver-bkn** for validation/checksum only; tar is produced via system ``tar``
-    (same layout as the TypeScript CLI) so the platform can find ``network.bkn`` at top level.
+    Uses **kweaver-bkn** for validation/checksum only; the upload archive is built with the
+    standard library ``tarfile`` module (top-level members, same layout as the TypeScript CLI)
+    so the platform can find ``network.bkn`` at top level.
     """
     from bkn import generate_checksum_file, load_network
 
