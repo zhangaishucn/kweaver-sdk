@@ -41,6 +41,7 @@ import { createDataView } from "../api/dataviews.js";
 import { downloadBkn, uploadBkn } from "../api/bkn-backend.js";
 import { formatCallOutput } from "./call.js";
 import { resolveBusinessDomain } from "../config/store.js";
+import { runDsImportCsv } from "./ds.js";
 
 export interface KnListOptions {
   offset: number;
@@ -786,6 +787,8 @@ Subcommands:
   get <kn-id> [options]   Get knowledge network detail (use --stats or --export)
   create [options]     Create a knowledge network (empty or from --body-file)
   create-from-ds <ds-id> --name X [--tables a,b] [--build]   Create KN from datasource
+  create-from-csv <ds-id> --files <glob> --name X [--table-prefix P] [--build]
+    Import CSVs then create knowledge network
   update <kn-id> [options]  Update a knowledge network
   delete <kn-id>       Delete a knowledge network
   build <kn-id> [--wait|--no-wait] [--timeout n]   Trigger full build
@@ -831,6 +834,7 @@ export async function runKnCommand(args: string[]): Promise<number> {
     if (subcommand === "get") return runKnGetCommand(rest);
     if (subcommand === "create") return runKnCreateCommand(rest);
     if (subcommand === "create-from-ds") return runKnCreateFromDsCommand(rest);
+    if (subcommand === "create-from-csv") return runKnCreateFromCsvCommand(rest);
     if (subcommand === "update") return runKnUpdateCommand(rest);
     if (subcommand === "delete") return runKnDeleteCommand(rest);
     if (subcommand === "build") return runKnBuildCommand(rest);
@@ -3076,4 +3080,136 @@ async function runKnSearchCommand(args: string[]): Promise<number> {
     console.error(formatHttpError(error));
     return 1;
   }
+}
+
+const KN_CREATE_FROM_CSV_HELP = `kweaver bkn create-from-csv <ds-id> --files <glob> --name X [options]
+
+Import CSV files into datasource, then create a knowledge network.
+
+Options:
+  --files <s>          CSV file paths (comma-separated or glob, required)
+  --name <s>           Knowledge network name (required)
+  --table-prefix <s>   Table name prefix (default: none)
+  --batch-size <n>     Rows per batch (default: 500)
+  --tables <a,b>       Tables to include in KN (default: all imported)
+  --build (default)    Build after creation
+  --no-build           Skip build
+  --timeout <n>        Build timeout in seconds (default: 300)
+  -bd, --biz-domain    Business domain (default: bd_public)`;
+
+function parseKnCreateFromCsvArgs(args: string[]): {
+  dsId: string;
+  files: string;
+  name: string;
+  tablePrefix: string;
+  batchSize: number;
+  tables: string[];
+  build: boolean;
+  timeout: number;
+  businessDomain: string;
+} {
+  let dsId = "";
+  let files = "";
+  let name = "";
+  let tablePrefix = "";
+  let batchSize = 500;
+  let tablesStr = "";
+  let build = true;
+  let timeout = 300;
+  let businessDomain = "";
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--help" || arg === "-h") throw new Error("help");
+    if (arg === "--files" && args[i + 1]) {
+      files = args[++i];
+      continue;
+    }
+    if (arg === "--name" && args[i + 1]) {
+      name = args[++i];
+      continue;
+    }
+    if (arg === "--table-prefix" && args[i + 1]) {
+      tablePrefix = args[++i];
+      continue;
+    }
+    if (arg === "--batch-size" && args[i + 1]) {
+      batchSize = parseInt(args[++i], 10);
+      if (Number.isNaN(batchSize) || batchSize < 1) batchSize = 500;
+      continue;
+    }
+    if (arg === "--tables" && args[i + 1]) {
+      tablesStr = args[++i];
+      continue;
+    }
+    if (arg === "--build") {
+      build = true;
+      continue;
+    }
+    if (arg === "--no-build") {
+      build = false;
+      continue;
+    }
+    if (arg === "--timeout" && args[i + 1]) {
+      timeout = parseInt(args[++i], 10);
+      if (Number.isNaN(timeout) || timeout < 1) timeout = 300;
+      continue;
+    }
+    if ((arg === "-bd" || arg === "--biz-domain") && args[i + 1]) {
+      businessDomain = args[++i];
+      continue;
+    }
+    if (!arg.startsWith("-") && !dsId) {
+      dsId = arg;
+    }
+  }
+
+  const tables = tablesStr ? tablesStr.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  if (!dsId || !files || !name) {
+    throw new Error("Usage: kweaver bkn create-from-csv <ds-id> --files <glob> --name X [options]");
+  }
+  if (!businessDomain) businessDomain = resolveBusinessDomain();
+  return { dsId, files, name, tablePrefix, batchSize, tables, build, timeout, businessDomain };
+}
+
+async function runKnCreateFromCsvCommand(args: string[]): Promise<number> {
+  let options: ReturnType<typeof parseKnCreateFromCsvArgs>;
+  try {
+    options = parseKnCreateFromCsvArgs(args);
+  } catch (error) {
+    if (error instanceof Error && error.message === "help") {
+      console.log(KN_CREATE_FROM_CSV_HELP);
+      return 0;
+    }
+    console.error(formatHttpError(error));
+    return 1;
+  }
+
+  // Phase 1: Import CSVs
+  console.error("Phase 1: Importing CSVs ...");
+  const importArgs = [
+    options.dsId,
+    "--files", options.files,
+    "--table-prefix", options.tablePrefix,
+    "--batch-size", String(options.batchSize),
+    "-bd", options.businessDomain,
+  ];
+  const importResult = await runDsImportCsv(importArgs);
+  if (importResult.code !== 0) {
+    console.error("CSV import failed — aborting KN creation");
+    return importResult.code;
+  }
+
+  // Phase 2: Create KN from datasource
+  console.error("Phase 2: Creating knowledge network ...");
+  const tables = options.tables.length > 0 ? options.tables : importResult.tables;
+  const knArgs = [
+    options.dsId,
+    "--name", options.name,
+    "--tables", tables.join(","),
+    options.build ? "--build" : "--no-build",
+    "--timeout", String(options.timeout),
+    "-bd", options.businessDomain,
+  ];
+  return runKnCreateFromDsCommand(knArgs);
 }
