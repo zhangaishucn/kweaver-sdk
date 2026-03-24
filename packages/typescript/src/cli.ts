@@ -34,7 +34,7 @@ Usage:
   kweaver agent get <agent_id> [-bd value] [--pretty]
   kweaver agent get-by-key <key> [-bd value] [--pretty]
   kweaver agent sessions <agent_id> [-bd value] [--limit N] [--pretty]
-  kweaver agent history <agent_id> <session_id> [-bd value] [--limit N] [--pretty]
+  kweaver agent history <conversation_id> [-bd value] [--limit N] [--pretty]
   kweaver agent create [options]
   kweaver agent update <agent_id> [options]
   kweaver agent delete <agent_id> [-bd value]

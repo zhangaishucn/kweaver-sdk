@@ -796,8 +796,8 @@ Subcommands:
   update <kn-id> [options]  Update a knowledge network
   delete <kn-id>       Delete a knowledge network
   build <kn-id> [--wait|--no-wait] [--timeout n]   Trigger full build
-  validate <directory>   Validate a local BKN directory (no upload)
-  push <directory> [--branch main]   Upload BKN directory as tar
+  validate <directory> [--detect-encoding|--no-detect-encoding] [--source-encoding n]   Validate local BKN (no upload)
+  push <directory> [--branch main] [--detect-encoding|--no-detect-encoding] [--source-encoding n]   Upload BKN as tar
   pull <kn-id> [<directory>] [--branch main]   Download BKN tar and extract
   export <kn-id>       Export knowledge network (alias for get --export)
   stats <kn-id>        Get statistics (alias for get --stats)
