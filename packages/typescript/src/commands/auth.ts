@@ -23,20 +23,32 @@ export async function runAuthCommand(args: string[]): Promise<number> {
   const rest = args.slice(1);
 
   if (!target || target === "--help" || target === "-h") {
-    console.log(`kweaver auth login <url>     Login to a platform (browser login)
-kweaver auth <url>           Login (shorthand)
-kweaver auth status [url]    Show current auth status
+    console.log(`kweaver auth login <url> [--alias <name>] [-u user] [-p pass] [--playwright]
+kweaver auth <url>           Login (shorthand; same options as login)
+kweaver auth status [url|alias]
 kweaver auth list            List saved platforms
-kweaver auth use <url>       Switch active platform
-kweaver auth logout [url]    Logout (clear local token)
-kweaver auth delete <url>    Delete saved credentials`);
+kweaver auth use <url|alias> Switch active platform
+kweaver auth logout [url|alias]   Logout (clear local token)
+kweaver auth delete <url|alias>   Delete saved credentials
+
+Login options (browser OAuth2 by default; use -u/-p for headless Playwright):
+  --alias <name>   Short name for this platform (use with auth use / status / logout)
+  -u, --username   Username (with -p triggers Playwright login)
+  -p, --password   Password
+  --playwright     Force browser (Playwright) login even without -u/-p`);
     return 0;
   }
 
   if (target === "login") {
+    if (rest[0] === "--help" || rest[0] === "-h") {
+      console.log(`kweaver auth login <platform-url> [--alias <name>] [-u user] [-p pass] [--playwright]`);
+      return 0;
+    }
     const url = rest[0];
-    if (!url) {
-      console.error("Usage: kweaver auth login <platform-url>");
+    if (!url || url.startsWith("-")) {
+      console.error(
+        "Usage: kweaver auth login <platform-url> [--alias <name>] [-u user] [-p pass] [--playwright]",
+      );
       return 1;
     }
     return runAuthCommand([url, ...rest.slice(1)]);
@@ -220,8 +232,8 @@ kweaver auth delete <url>    Delete saved credentials`);
     return 0;
   }
 
-  console.error("Usage: kweaver auth login <platform-url>");
-  console.error("       kweaver auth <platform-url> [--alias <name>]");
+  console.error("Usage: kweaver auth login <platform-url> [--alias <name>] [-u user] [-p pass] [--playwright]");
+  console.error("       kweaver auth <platform-url> [--alias <name>] [-u user] [-p pass] [--playwright]");
   console.error("       kweaver auth status [platform-url|alias]");
   console.error("       kweaver auth list");
   console.error("       kweaver auth use <platform-url|alias>");

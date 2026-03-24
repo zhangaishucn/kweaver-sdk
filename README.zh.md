@@ -190,7 +190,7 @@ result    = client.action_types.execute("bkn-id", "at-id", params={})
 ## 命令速查
 
 ```bash
-kweaver auth login/status/list/use/delete/logout
+kweaver auth login <url> [--alias name] [-u user] [-p pass] [--playwright] — 另有 status、list、use、delete、logout
 kweaver token
 kweaver bkn list/get/stats/export/create/update/delete
 kweaver bkn object-type list/get/create/update/delete/query/properties

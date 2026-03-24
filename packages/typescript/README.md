@@ -98,7 +98,7 @@ const results = await cl.search({ query: "hypertension treatment" });
 ## CLI Reference
 
 ```
-kweaver auth login/status/list/use/delete/logout
+kweaver auth login <url> [--alias name] [-u user] [-p pass] [--playwright] — also: status, list, use, delete, logout
 kweaver token
 kweaver bkn list/get/stats/export/create/update/delete
 kweaver bkn object-type list/get/create/update/delete/query/properties
