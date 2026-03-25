@@ -20,3 +20,25 @@ tags: [{标签1}, {标签2}]
 | Source Property | Target Property |
 |-----------------|-----------------|
 | {source_prop} | {target_prop} |
+
+<!-- 当 Type 为 data_view 时，用以下节替换 Mapping Rules：
+
+### Mapping View
+
+| Type | ID |
+|------|-----|
+| data_view | {view_id} |
+
+### Source Mapping
+
+| Source Property | View Property |
+|-----------------|---------------|
+| {source_prop} | {view_prop} |
+
+### Target Mapping
+
+| View Property | Target Property |
+|---------------|-----------------|
+| {view_prop} | {target_prop} |
+
+-->

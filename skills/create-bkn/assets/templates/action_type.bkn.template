@@ -67,8 +67,8 @@ condition:
 | Parameter | Type | Source | Binding | Description |
 |-----------|------|--------|---------|-------------|
 | {param} | string | property | {property_name} | {说明} |
-| {param} | string | input | - | {说明} |
-| {param} | string | const | {value} | {说明} |
+| {param} | array | input | - | {说明} |
+| {param} | number | const | {value} | {说明} |
 
 ### Schedule
 

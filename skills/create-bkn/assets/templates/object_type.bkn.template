@@ -24,23 +24,24 @@ Incremental Key:
 
 ### Logic Properties
 
-<!-- 可选：为空时留空即可 -->
-
-<!-- 子章节格式（指标、算子等扩展属性）：
+<!-- 可选：无逻辑属性时保留空标题即可。有内容时按以下格式添加子章节：
 
 #### {logic_property_name}
 
 - **Display**: {显示名}
-- **Type**: operator
-- **Source**: {source_id} ({source_type})
+- **Type**: metric 或 operator
+- **Source**: {source_id} (metric) 或 {source_id} (operator)
+- **Description**: {描述}
 
 | Parameter | Type | Source | Binding | Description |
 |-----------|------|--------|---------|-------------|
 | {param} | string | property | {property_name} | {说明} |
-| {param} | string | input | - | {说明} |
-| {param} | string | const | {value} | {说明} |
+| {param} | array | input | - | {说明} |
+| {param} | number | const | {value} | {说明} |
 
 -->
+
+<!-- 可选：无数据视图绑定时省略整个 Data Source 节 -->
 
 ### Data Source
 
