@@ -49,6 +49,31 @@ import { formatCallOutput } from "./call.js";
 import { resolveBusinessDomain } from "../config/store.js";
 import { runDsImportCsv } from "./ds.js";
 
+// ── Shared polling helper with exponential backoff ───────────────────────────
+
+export interface PollOptions<T> {
+  fn: () => Promise<{ done: boolean; value: T }>;
+  interval: number;
+  timeout: number;
+  maxInterval?: number;
+  _sleep?: (ms: number) => Promise<void>;
+}
+
+export async function pollWithBackoff<T>(opts: PollOptions<T>): Promise<T> {
+  const { fn, timeout, maxInterval = 15000, _sleep = (ms) => new Promise(r => setTimeout(r, ms)) } = opts;
+  let currentInterval = opts.interval;
+  const deadline = Date.now() + timeout;
+
+  while (Date.now() < deadline) {
+    const result = await fn();
+    if (result.done) return result.value;
+    await _sleep(currentInterval);
+    currentInterval = Math.min(currentInterval * 2, maxInterval);
+  }
+
+  throw new Error(`Polling timed out after ${timeout}ms`);
+}
+
 export interface KnListOptions {
   offset: number;
   limit: number;
@@ -2026,26 +2051,34 @@ query/execute: Query or execute actions. execute has side effects - only use whe
         console.log(formatCallOutput(result, options.pretty));
         return 0;
       }
-      const deadline = Date.now() + options.timeout * 1000;
       let lastBody = result;
-      while (Date.now() < deadline) {
-        const status = extractStatus(lastBody);
-        if (TERMINAL_STATUSES.includes(status.toUpperCase())) {
-          console.log(formatCallOutput(lastBody, options.pretty));
-          return status.toUpperCase() === "SUCCESS" ? 0 : 1;
-        }
-        await new Promise((r) => setTimeout(r, 2000));
-        lastBody = await actionExecutionGet({
-          baseUrl: token.baseUrl,
-          accessToken: token.accessToken,
-          knId: options.knId,
-          executionId,
-          businessDomain: options.businessDomain,
+      try {
+        lastBody = await pollWithBackoff({
+          fn: async () => {
+            const status = extractStatus(lastBody);
+            if (TERMINAL_STATUSES.includes(status.toUpperCase())) {
+              return { done: true, value: lastBody };
+            }
+            lastBody = await actionExecutionGet({
+              baseUrl: token.baseUrl,
+              accessToken: token.accessToken,
+              knId: options.knId,
+              executionId,
+              businessDomain: options.businessDomain,
+            });
+            return { done: false, value: lastBody };
+          },
+          interval: 2000,
+          timeout: options.timeout * 1000,
         });
+      } catch {
+        console.error(`Action execution did not complete within ${options.timeout}s`);
+        console.log(formatCallOutput(lastBody, options.pretty));
+        return 1;
       }
-      console.error(`Action execution did not complete within ${options.timeout}s`);
+      const finalStatus = extractStatus(lastBody);
       console.log(formatCallOutput(lastBody, options.pretty));
-      return 1;
+      return finalStatus.toUpperCase() === "SUCCESS" ? 0 : 1;
     } catch (error) {
       console.error(formatHttpError(error));
       return 1;
@@ -2635,20 +2668,24 @@ async function runKnCreateFromDsCommand(
     if (options.build) {
       console.error("Building ...");
       await buildKnowledgeNetwork({ ...base, knId });
-      const deadline = Date.now() + options.timeout * 1000;
       const TERMINAL = ["completed", "failed", "success"];
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const statusBody = await getBuildStatus({ ...base, knId });
-        const statusParsed = JSON.parse(statusBody) as
-          | Array<{ state?: string }>
-          | { entries?: Array<{ state?: string }> };
-        const jobs = Array.isArray(statusParsed) ? statusParsed : (statusParsed.entries ?? []);
-        const state = (jobs[0]?.state ?? "running").toLowerCase();
-        if (TERMINAL.includes(state)) {
-          statusStr = state;
-          break;
-        }
+      try {
+        statusStr = await pollWithBackoff({
+          fn: async () => {
+            const statusBody = await getBuildStatus({ ...base, knId });
+            const statusParsed = JSON.parse(statusBody) as
+              | Array<{ state?: string }>
+              | { entries?: Array<{ state?: string }> };
+            const jobs = Array.isArray(statusParsed) ? statusParsed : (statusParsed.entries ?? []);
+            const state = (jobs[0]?.state ?? "running").toLowerCase();
+            if (TERMINAL.includes(state)) return { done: true, value: state };
+            return { done: false, value: "running" };
+          },
+          interval: 2000,
+          timeout: options.timeout * 1000,
+        });
+      } catch {
+        // timeout — statusStr remains "skipped"
       }
     }
 
@@ -2832,35 +2869,37 @@ async function runKnBuildCommand(args: string[]): Promise<number> {
     }
 
     console.error("Waiting for build to complete ...");
-    const deadline = Date.now() + options.timeout * 1000;
-
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const body = await getBuildStatus({
-        baseUrl: token.baseUrl,
-        accessToken: token.accessToken,
-        knId: options.knId,
-        businessDomain: options.businessDomain,
+    try {
+      const { state, detail } = await pollWithBackoff<{ state: string; detail?: string }>({
+        fn: async () => {
+          const body = await getBuildStatus({
+            baseUrl: token.baseUrl,
+            accessToken: token.accessToken,
+            knId: options.knId,
+            businessDomain: options.businessDomain,
+          });
+          const parsed = JSON.parse(body) as
+            | Array<{ state?: string; state_detail?: string }>
+            | { entries?: Array<{ state?: string; state_detail?: string }>; data?: Array<{ state?: string; state_detail?: string }> };
+          const jobs = Array.isArray(parsed) ? parsed : (parsed.entries ?? parsed.data ?? []);
+          const job = jobs[0];
+          const st = (job?.state ?? "running").toLowerCase();
+          const dt = job?.state_detail;
+          if (TERMINAL_STATES.includes(st)) return { done: true, value: { state: st, detail: dt } };
+          return { done: false, value: { state: st } };
+        },
+        interval: 2000,
+        timeout: options.timeout * 1000,
       });
-      const parsed = JSON.parse(body) as
-        | Array<{ state?: string; state_detail?: string }>
-        | { entries?: Array<{ state?: string; state_detail?: string }>; data?: Array<{ state?: string; state_detail?: string }> };
-      const jobs = Array.isArray(parsed) ? parsed : (parsed.entries ?? parsed.data ?? []);
-      const job = jobs[0];
-      const state = (job?.state ?? "running").toLowerCase();
-      const detail = job?.state_detail;
-
-      if (TERMINAL_STATES.includes(state)) {
-        console.log(state);
-        if (detail) {
-          console.log(`Detail: ${detail}`);
-        }
-        return state === "failed" ? 1 : 0;
+      console.log(state);
+      if (detail) {
+        console.log(`Detail: ${detail}`);
       }
+      return state === "failed" ? 1 : 0;
+    } catch {
+      console.error(`Build did not complete within ${options.timeout}s`);
+      return 1;
     }
-
-    console.error(`Build did not complete within ${options.timeout}s`);
-    return 1;
   } catch (error) {
     console.error(formatHttpError(error));
     return 1;

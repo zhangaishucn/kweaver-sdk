@@ -13,6 +13,7 @@ import {
   packDirectoryToTar,
   extractTarToDirectory,
   runKnCommand,
+  pollWithBackoff,
 } from "../src/commands/bkn.js";
 import { downloadBkn, uploadBkn } from "../src/api/bkn-backend.js";
 
@@ -299,5 +300,38 @@ test("validate: fails on directory without network.bkn", async () => {
   writeFileSync(join(otDir, "item.bkn"), "---\ntype: object_type\nid: item\nname: Item\n---\n# Item\n");
   const code = await runKnCommand(["validate", badDir]);
   assert.equal(code, 1);
+});
+
+// ── pollWithBackoff ──────────────────────────────────────────────────────────
+
+test("pollWithBackoff uses exponential backoff", async () => {
+  const sleepDurations: number[] = [];
+  let callCount = 0;
+
+  const result = await pollWithBackoff({
+    fn: async () => {
+      callCount++;
+      if (callCount < 3) return { done: false, value: undefined };
+      return { done: true, value: "completed" };
+    },
+    interval: 2000,
+    timeout: 60000,
+    _sleep: async (ms: number) => { sleepDurations.push(ms); },
+  });
+
+  assert.equal(result, "completed");
+  assert.deepEqual(sleepDurations, [2000, 4000]);
+});
+
+test("pollWithBackoff throws on timeout", async () => {
+  await assert.rejects(
+    () => pollWithBackoff({
+      fn: async () => ({ done: false, value: undefined }),
+      interval: 100,
+      timeout: 0,
+      _sleep: async () => {},
+    }),
+    /timed out/i,
+  );
 });
 
