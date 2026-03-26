@@ -65,7 +65,7 @@ export async function listConversations(opts: ListConversationsOptions): Promise
 
 function buildTracesUrl(baseUrl: string, conversationId: string): string {
   const base = baseUrl.replace(/\/+$/, "");
-  return `${base}/api/v1/traces/by-conversation?conversation_id=${conversationId}`;
+  return `${base}/api/agent-observability/v1/traces/by-conversation?conversation_id=${conversationId}`;
 }
 
 export async function getTracesByConversation(opts: GetTracesOptions): Promise<string> {
