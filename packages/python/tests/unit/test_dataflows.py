@@ -244,3 +244,26 @@ def test_dataflow_step_defaults():
 def test_dataflow_result_defaults():
     result = DataflowResult(status="success")
     assert result.reason is None
+
+
+def test_poll_uses_exponential_backoff(capture: RequestCapture):
+    """Poll should use exponential backoff instead of fixed interval."""
+    call_count = 0
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if call_count < 5:
+            return httpx.Response(200, json={"results": []})
+        return httpx.Response(200, json={"results": [{"status": "success"}]})
+
+    client = make_client(handler, capture)
+    sleep_calls = []
+    with patch("kweaver.resources.dataflows.time.sleep", side_effect=lambda s: sleep_calls.append(s)):
+        with patch("kweaver.resources.dataflows.time.monotonic") as mock_mono:
+            mock_mono.return_value = 0.0
+            result = client.dataflows.poll("dag_001", interval=3.0, timeout=900.0)
+
+    assert result.status == "success"
+    # Backoff: 3, 6, 12, 24 (doubling from initial interval, capped at 30)
+    assert sleep_calls == [3.0, 6.0, 12.0, 24.0]

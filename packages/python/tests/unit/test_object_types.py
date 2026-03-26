@@ -156,3 +156,34 @@ def test_delete_multiple_object_types(capture: RequestCapture):
     client = make_client(handler, capture)
     client.object_types.delete("kn_01", ["ot_01", "ot_02"])
     assert "/object-types/ot_01,ot_02" in capture.last_url()
+
+
+def test_create_existed_fallback_passes_keyword(capture: RequestCapture):
+    """When OT already exists, list() should filter by keyword instead of fetching all."""
+    call_count = 0
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if req.method == "POST":
+            return httpx.Response(409, json={
+                "error_code": "Existed",
+                "message": "Object type already exists",
+            })
+        # GET (list) — return matching OT
+        return httpx.Response(200, json={
+            "entries": [_OT_RESPONSE],
+        })
+
+    client = make_client(handler, capture)
+    ot = client.object_types.create(
+        "kn_01", name="产品", dataview_id="dv_01",
+        primary_keys=["material_number"], display_key="product_name",
+    )
+
+    assert ot.id == "ot_01"
+    # Verify the GET request includes keyword filter
+    get_reqs = [r for r in capture.requests if r.method == "GET" and "object-types" in str(r.url) and "?" in str(r.url)]
+    assert get_reqs, "Expected a filtered list request"
+    url = str(get_reqs[0].url)
+    assert "keyword" in url, f"Expected keyword param in URL: {url}"

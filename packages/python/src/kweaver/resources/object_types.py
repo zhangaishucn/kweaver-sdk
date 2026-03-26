@@ -77,7 +77,7 @@ class ObjectTypesResource:
             return _parse_object_type(items[0], kn_id)
         except KWeaverError as exc:
             if "Existed" in (exc.error_code or "") or "已存在" in (exc.message or ""):
-                existing = self.list(kn_id)
+                existing = self.list(kn_id, keyword=name)
                 logger.debug(
                     "OT name=%r already exists, found %d OTs: %s",
                     name, len(existing), [ot.name for ot in existing],
@@ -87,10 +87,13 @@ class ObjectTypesResource:
                         return ot
             raise
 
-    def list(self, kn_id: str, *, branch: str = "main") -> list[ObjectType]:
+    def list(self, kn_id: str, *, branch: str = "main", keyword: str | None = None) -> list[ObjectType]:
+        params: dict[str, Any] = {"limit": -1, "branch": branch}
+        if keyword:
+            params["keyword"] = keyword
         data = self._http.get(
             f"{_PREFIX}/knowledge-networks/{kn_id}/object-types",
-            params={"limit": -1, "branch": branch},
+            params=params,
         )
         items = data if isinstance(data, list) else (data.get("entries") or data.get("data") or [])
         return [_parse_object_type(d, kn_id) for d in items]

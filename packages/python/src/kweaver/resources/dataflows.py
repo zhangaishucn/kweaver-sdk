@@ -77,6 +77,7 @@ class DataflowsResource:
         Raises ``KWeaverError`` on failed/error status, ``TimeoutError`` on timeout.
         """
         deadline = time.monotonic() + timeout
+        current_interval = interval
 
         while True:
             data = self._http.get(f"{_BASE}/dag/{dag_id}/results")
@@ -95,11 +96,12 @@ class DataflowsResource:
                         msg += f": {reason}"
                     raise KWeaverError(msg, status_code=None, error_code=None)
 
-            if time.monotonic() + interval > deadline:
+            if time.monotonic() + current_interval > deadline:
                 raise TimeoutError(
                     f"Dataflow polling timed out after {timeout}s for DAG {dag_id}"
                 )
-            time.sleep(interval)
+            time.sleep(current_interval)
+            current_interval = min(current_interval * 2, 30.0)
 
     def delete(self, dag_id: str) -> None:
         """Delete a dataflow DAG. Best-effort — does not raise on errors."""
