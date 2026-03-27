@@ -466,3 +466,160 @@ test("refreshAccessToken: no tlsInsecure when original token lacks it", async ()
     globalThis.fetch = originalFetch;
   }
 });
+
+// --- refreshTokenLogin ---
+
+test("refreshTokenLogin: exchanges refresh token, saves client + token, sets current platform", async () => {
+  const configDir = createConfigDir();
+  const { store, oauth } = await importOauthAndStore(configDir);
+  const baseUrl = "https://headless.example.com";
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const u = typeof input === "string" ? input : input.toString();
+    assert.ok(u.includes("/oauth2/token"));
+    return new Response(
+      JSON.stringify({
+        access_token: "headless-at",
+        token_type: "Bearer",
+        expires_in: 7200,
+        scope: "openid",
+        refresh_token: "new-rt",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+  try {
+    const token = await oauth.refreshTokenLogin(baseUrl, {
+      clientId: "cid-remote",
+      clientSecret: "csec-remote",
+      refreshToken: "original-rt",
+    });
+    assert.equal(token.accessToken, "headless-at");
+    assert.equal(token.refreshToken, "new-rt");
+    assert.equal(token.expiresIn, 7200);
+
+    const client = store.loadClientConfig(baseUrl);
+    assert.equal(client?.clientId, "cid-remote");
+    assert.equal(client?.clientSecret, "csec-remote");
+
+    const disk = store.loadTokenConfig(baseUrl);
+    assert.equal(disk?.accessToken, "headless-at");
+
+    assert.equal(store.getCurrentPlatform(), baseUrl);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("refreshTokenLogin: preserves tlsInsecure flag", async () => {
+  const configDir = createConfigDir();
+  const { store, oauth } = await importOauthAndStore(configDir);
+  const baseUrl = "https://tls.example.com";
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ access_token: "at", expires_in: 3600 }), { status: 200 });
+  try {
+    const token = await oauth.refreshTokenLogin(baseUrl, {
+      clientId: "c",
+      clientSecret: "s",
+      refreshToken: "rt",
+      tlsInsecure: true,
+    });
+    assert.equal(token.tlsInsecure, true);
+    const disk = store.loadTokenConfig(baseUrl);
+    assert.equal(disk?.tlsInsecure, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("refreshTokenLogin: throws on invalid refresh token", async () => {
+  const configDir = createConfigDir();
+  const { oauth } = await importOauthAndStore(configDir);
+  const baseUrl = "https://fail.example.com";
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ error: "invalid_grant", error_description: "expired" }), {
+      status: 400,
+      statusText: "Bad Request",
+    });
+  try {
+    await assert.rejects(
+      () => oauth.refreshTokenLogin(baseUrl, { clientId: "c", clientSecret: "s", refreshToken: "bad" }),
+      (err: unknown) => {
+        assert.ok(err instanceof HttpError);
+        assert.equal((err as HttpError).status, 400);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// --- buildCopyCommand ---
+
+test("buildCopyCommand: includes all parts", async () => {
+  const configDir = createConfigDir();
+  const { oauth } = await importOauthAndStore(configDir);
+  const cmd = oauth.buildCopyCommand("https://ex.com/", "cid", "csec", "rt123", false);
+  assert.match(cmd, /kweaver/);
+  assert.match(cmd, /auth/);
+  assert.match(cmd, /login/);
+  assert.match(cmd, /--client-id/);
+  assert.match(cmd, /cid/);
+  assert.match(cmd, /--client-secret/);
+  assert.match(cmd, /csec/);
+  assert.match(cmd, /--refresh-token/);
+  assert.match(cmd, /rt123/);
+  assert.ok(!cmd.includes("--insecure"));
+});
+
+test("buildCopyCommand: includes --insecure when tlsInsecure", async () => {
+  const configDir = createConfigDir();
+  const { oauth } = await importOauthAndStore(configDir);
+  const cmd = oauth.buildCopyCommand("https://ex.com", "c", "s", "r", true);
+  assert.match(cmd, /--insecure/);
+});
+
+test("buildCopyCommand: omits --client-secret when empty", async () => {
+  const configDir = createConfigDir();
+  const { oauth } = await importOauthAndStore(configDir);
+  const cmd = oauth.buildCopyCommand("https://ex.com", "c", "", "r", false);
+  assert.ok(!cmd.includes("--client-secret"));
+});
+
+test("buildCopyCommand: omits --refresh-token when undefined", async () => {
+  const configDir = createConfigDir();
+  const { oauth } = await importOauthAndStore(configDir);
+  const cmd = oauth.buildCopyCommand("https://ex.com", "c", "s", undefined, false);
+  assert.ok(!cmd.includes("--refresh-token"));
+});
+
+// --- buildCallbackHtml ---
+
+test("buildCallbackHtml: contains key elements", async () => {
+  const configDir = createConfigDir();
+  const { oauth } = await importOauthAndStore(configDir);
+  const html = oauth.buildCallbackHtml("kweaver auth login 'https://ex.com' --client-id 'c' --client-secret 's' --refresh-token 'r'");
+  assert.match(html, /Login successful/);
+  assert.match(html, /Headless machine/);
+  assert.match(html, /no browser/);
+  assert.match(html, /Copy command/);
+  assert.match(html, /kw-copy/);
+  assert.match(html, /kw-cmd/);
+  assert.match(html, /credentials secure/);
+  assert.match(html, /--client-id/);
+  assert.match(html, /--refresh-token/);
+});
+
+test("buildCallbackHtml: escapes HTML entities", async () => {
+  const configDir = createConfigDir();
+  const { oauth } = await importOauthAndStore(configDir);
+  const html = oauth.buildCallbackHtml("kweaver auth login '<script>alert(1)</script>'");
+  assert.ok(!html.includes("<script>alert(1)</script>"));
+  assert.match(html, /&lt;script&gt;/);
+});

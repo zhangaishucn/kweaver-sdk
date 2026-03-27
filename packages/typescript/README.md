@@ -31,6 +31,18 @@ export KWEAVER_BASE_URL=https://your-kweaver-instance.com
 export KWEAVER_TOKEN=your-token
 ```
 
+### Business domain (platform)
+
+Set or verify **before** calling list/query APIs that scope by tenant. DIP deployments often need a UUID, not only `bd_public`.
+
+```bash
+kweaver config show
+kweaver config list-bd
+kweaver config set-bd <uuid>
+```
+
+After `kweaver auth login`, the CLI may auto-select a domain when none is saved yet. Override with `KWEAVER_BUSINESS_DOMAIN` or `-bd` / `--biz-domain` on commands. See [`../../skills/kweaver-core/references/config.md`](../../skills/kweaver-core/references/config.md).
+
 ### Simple API (recommended)
 
 ```typescript
@@ -102,6 +114,11 @@ const exact = await client.dataviews.find("orders", {
   wait: true,
 });
 const dv = await client.dataviews.get(viewId);
+const queryRows = await client.dataviews.query(viewId, {
+  sql: "SELECT id, name FROM orders LIMIT 10",
+  limit: 10,
+  needTotal: true,
+});
 
 // Dataflow automation (CSV import pipeline, etc.)
 const result = await client.dataflows.execute({
@@ -121,12 +138,15 @@ const results = await cl.search({ query: "hypertension treatment" });
 ## CLI Reference
 
 ```
-kweaver auth login <url> [--alias name] [-u user] [-p pass] [--playwright] [--insecure|-k] — also: status, list, use, delete, logout
+kweaver auth login <url> [--alias name] [-u user] [-p pass] [--playwright] [--insecure|-k]
+kweaver auth login <url> --client-id ID --client-secret S --refresh-token T   (headless login)
+kweaver auth export [url|alias] [--json]   (export command to run on a headless host)
+kweaver auth status/list/use/delete/logout
+kweaver config show / list-bd / set-bd <value>   # platform business domain — after login
 kweaver token
-kweaver config show / set-bd <value>
 kweaver ds list/get/delete/tables/connect
 kweaver ds import-csv <ds_id> --files <glob> [--table-prefix <p>] [--batch-size 500]
-kweaver dataview list/find/get/delete
+kweaver dataview list/find/get/query/delete
 kweaver bkn list/get/stats/export/create/update/delete
 kweaver bkn create-from-ds <ds_id> --name <name> [--tables t1,t2] [--build]
 kweaver bkn create-from-csv <ds_id> --files <glob> --name <name> [--build]
@@ -178,6 +198,23 @@ If you encounter errors like `fetch failed`, `self-signed certificate`, or `UNAB
    ```
 
 > **Security note:** All of the above disable HTTPS certificate verification and should only be used in development or internal network environments. Use trusted CA-signed certificates in production.
+
+### Headless / Server Authentication
+
+For servers or CI environments without a browser, log in on any machine that has one, then transfer credentials:
+
+**Step 1 — Browser machine:** Run `kweaver auth login` as usual. The callback page displays a ready-to-copy command with `--client-id`, `--client-secret`, and `--refresh-token`. Alternatively, run `kweaver auth export` to print the same command.
+
+**Step 2 — On the machine without a browser:** Run the pasted command there (SSH server, CI, etc.):
+
+```bash
+kweaver auth login https://your-platform \
+  --client-id abc123 \
+  --client-secret def456 \
+  --refresh-token ghi789
+```
+
+The SDK exchanges the refresh token for a new access token and saves it locally. Auto-refresh works normally from that point on.
 
 ## Using with AI Agents
 

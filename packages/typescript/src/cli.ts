@@ -19,6 +19,8 @@ Usage:
 
   kweaver auth <platform-url> [--alias name] [-u user] [-p pass] [--playwright] [--insecure|-k]
   kweaver auth login <platform-url>          (alias for auth <url>)
+  kweaver auth login <url> --client-id ID --client-secret S --refresh-token T   (run on host without browser)
+  kweaver auth export [platform-url|alias] [--json]
   kweaver auth status [platform-url|alias]
   kweaver auth list
   kweaver auth use <platform-url|alias>
@@ -52,6 +54,7 @@ Usage:
   kweaver dataview list [--datasource-id id] [--type atomic|custom] [--limit n] [-bd value] [--pretty]
   kweaver dataview find --name <name> [--exact] [--datasource-id id] [--wait] [--timeout ms] [-bd value] [--pretty]
   kweaver dataview get <id> [-bd value] [--pretty]
+  kweaver dataview query <id> [--sql sql] [--limit n] [--offset n] [--need-total] [-bd value] [--pretty]
   kweaver dataview delete <id> [-y] [-bd value]
 
   kweaver bkn list [options]
@@ -75,6 +78,7 @@ Usage:
   kweaver bkn action-log list|get|cancel <kn-id> ...
 
   kweaver config set-bd <value>
+  kweaver config list-bd
   kweaver config show
 
   kweaver vega health|stats|inspect
@@ -97,7 +101,7 @@ Commands:
   call (curl)    Call an API with curl-style flags and auto-injected token headers
   agent          Agent CRUD, chat, sessions, history, publish/unpublish
   ds             Manage datasources (list, get, delete, tables, connect)
-  dataview|dv    List, find, get, delete data views (atomic / custom)
+  dataview|dv    List, find, get, query (SQL), delete data views (atomic / custom)
   bkn            Knowledge network (CRUD, build, validate, export, stats, push/pull,
                  object-type, relation-type, subgraph, action-type, action-execution, action-log)
   config         Per-platform configuration (business domain)

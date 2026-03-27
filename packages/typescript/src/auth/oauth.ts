@@ -1,3 +1,4 @@
+import type { Server } from "node:http";
 import {
   type ClientConfig,
   type TokenConfig,
@@ -17,6 +18,98 @@ const REFRESH_THRESHOLD_SEC = 60;
 
 const DEFAULT_REDIRECT_PORT = 9010;
 const DEFAULT_SCOPE = "openid offline all";
+
+/** POSIX shell single-quote escaping for copy-paste commands. */
+export function shellQuoteForShell(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Build a one-line `kweaver auth login ...` command for headless / other machines.
+ * Omits `--client-secret` when empty (PKCE-only client); headless refresh may still require a confidential client.
+ */
+export function buildCopyCommand(
+  baseUrl: string,
+  clientId: string,
+  clientSecret: string,
+  refreshToken: string | undefined,
+  tlsInsecure?: boolean,
+): string {
+  const parts = ["kweaver", "auth", "login", shellQuoteForShell(normalizeBaseUrl(baseUrl)), "--client-id", shellQuoteForShell(clientId)];
+  if (clientSecret) {
+    parts.push("--client-secret", shellQuoteForShell(clientSecret));
+  }
+  if (refreshToken) {
+    parts.push("--refresh-token", shellQuoteForShell(refreshToken));
+  }
+  if (tlsInsecure) {
+    parts.push("--insecure");
+  }
+  return parts.join(" ");
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * HTML shown after successful OAuth callback with a copyable headless login command.
+ */
+export function buildCallbackHtml(copyCommand: string): string {
+  const safeCmd = escapeHtml(copyCommand);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Login successful</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    pre { background: #f4f4f5; padding: 1rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+    button { margin-top: 0.75rem; padding: 0.5rem 1rem; cursor: pointer; }
+    .warn { color: #b45309; margin-top: 1.5rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h2>Login successful</h2>
+  <p>You can close this tab.</p>
+  <h3>Headless machine</h3>
+  <p>On the computer that has no browser (SSH server, CI runner, container), run:</p>
+  <pre id="kw-cmd">${safeCmd}</pre>
+  <button type="button" id="kw-copy">Copy command</button>
+  <p class="warn">Keep these credentials secure. Anyone with the refresh token and client secret can obtain new access tokens.</p>
+  <script>
+    (function () {
+      var btn = document.getElementById("kw-copy");
+      var pre = document.getElementById("kw-cmd");
+      if (btn && pre) {
+        btn.addEventListener("click", function () {
+          var text = pre.textContent || "";
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text.trim()).then(function () {
+              btn.textContent = "Copied";
+              setTimeout(function () { btn.textContent = "Copy command"; }, 2000);
+            });
+          } else {
+            window.prompt("Copy this command:", text.trim());
+          }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+function buildCallbackExchangeErrorHtml(message: string): string {
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><title>Login error</title></head>
+<body><h2>Login error</h2><pre>${escapeHtml(message)}</pre></body></html>`;
+}
 
 export function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
@@ -125,36 +218,81 @@ export async function oauth2Login(
   }
   const authUrl = `${base}/oauth2/auth?${authParams.toString()}`;
 
-  // Step 4: Start local callback server, wait for code
-  const code = await new Promise<string>((resolve, reject) => {
+  // Step 4: Start local callback server; exchange code inside handler, then show credentials HTML
+  const token = await new Promise<TokenConfig>((resolve, reject) => {
+    let server: Server;
     const timeoutId = setTimeout(() => {
-      server.close();
+      server?.close();
       reject(new Error("OAuth2 login timed out (120s). No authorization code received."));
     }, 120_000);
 
-    const server = createServer((req, res) => {
-      const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
-      if (url.pathname === "/callback") {
-        const receivedState = url.searchParams.get("state");
-        const receivedCode = url.searchParams.get("code");
+    server = createServer((req, res) => {
+      void (async () => {
+        try {
+          const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+          if (url.pathname !== "/callback") {
+            res.writeHead(404);
+            res.end();
+            return;
+          }
 
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end("<html><body><h2>Login successful. You can close this tab.</h2></body></html>");
+          const receivedState = url.searchParams.get("state");
+          const receivedCode = url.searchParams.get("code");
 
-        clearTimeout(timeoutId);
-        server.close();
+          if (receivedState !== state) {
+            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(buildCallbackExchangeErrorHtml("OAuth2 state mismatch — possible CSRF attack."));
+            clearTimeout(timeoutId);
+            server.close();
+            reject(new Error("OAuth2 state mismatch — possible CSRF attack."));
+            return;
+          }
+          if (!receivedCode) {
+            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(buildCallbackExchangeErrorHtml("No authorization code received in callback."));
+            clearTimeout(timeoutId);
+            server.close();
+            reject(new Error("No authorization code received in callback."));
+            return;
+          }
 
-        if (receivedState !== state) {
-          reject(new Error("OAuth2 state mismatch — possible CSRF attack."));
-        } else if (!receivedCode) {
-          reject(new Error("No authorization code received in callback."));
-        } else {
-          resolve(receivedCode);
+          const exchanged = await exchangeCodeForToken(
+            base,
+            receivedCode,
+            client.clientId,
+            client.clientSecret,
+            redirectUri,
+            pkce?.verifier,
+            options?.tlsInsecure,
+          );
+
+          const copyCommand = buildCopyCommand(
+            base,
+            client.clientId,
+            client.clientSecret,
+            exchanged.refreshToken,
+            options?.tlsInsecure,
+          );
+
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(buildCallbackHtml(copyCommand));
+
+          clearTimeout(timeoutId);
+          server.close();
+          resolve(exchanged);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          try {
+            res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(buildCallbackExchangeErrorHtml(message));
+          } catch {
+            /* response may already be sent */
+          }
+          clearTimeout(timeoutId);
+          server.close();
+          reject(err instanceof Error ? err : new Error(message));
         }
-      } else {
-        res.writeHead(404);
-        res.end();
-      }
+      })();
     });
 
     server.listen(port, "127.0.0.1", () => {
@@ -165,17 +303,6 @@ export async function oauth2Login(
       process.stderr.write(`If the wrong browser opens, copy this URL to your correct browser:\n  ${authUrl}\n`);
     });
   });
-
-  // Step 6: Exchange code for tokens
-  const token = await exchangeCodeForToken(
-    base,
-    code,
-    client.clientId,
-    client.clientSecret,
-    redirectUri,
-    pkce?.verifier,
-    options?.tlsInsecure,
-  );
 
   setCurrentPlatform(base);
   return token;
@@ -358,42 +485,89 @@ export async function playwrightLogin(
   });
   const authUrl = `${base}/oauth2/auth?${authParams.toString()}`;
 
-  // Step 4: Start local callback server to capture the authorization code
-  const code = await new Promise<string>((resolve, reject) => {
+  // Step 4: Start local callback server; exchange code inside handler, then show credentials HTML
+  let browser: any;
+  const token = await new Promise<TokenConfig>((resolve, reject) => {
     const TIMEOUT_MS = hasCredentials ? 30_000 : 120_000;
+    let server: Server;
     const timeoutId = setTimeout(() => {
-      server.close();
+      server?.close();
       browser?.close();
       reject(new Error(`OAuth2 login timed out (${TIMEOUT_MS / 1000}s). No authorization code received.`));
     }, TIMEOUT_MS);
 
-    const server = createServer((req, res) => {
-      const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
-      if (url.pathname === "/callback") {
-        const receivedState = url.searchParams.get("state");
-        const receivedCode = url.searchParams.get("code");
+    server = createServer((req, res) => {
+      void (async () => {
+        try {
+          const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+          if (url.pathname !== "/callback") {
+            res.writeHead(404);
+            res.end();
+            return;
+          }
 
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end("<html><body><h2>Login successful. You can close this tab.</h2></body></html>");
+          const receivedState = url.searchParams.get("state");
+          const receivedCode = url.searchParams.get("code");
 
-        clearTimeout(timeoutId);
-        server.close();
-        browser?.close();
+          if (receivedState !== state) {
+            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(buildCallbackExchangeErrorHtml("OAuth2 state mismatch — possible CSRF attack."));
+            clearTimeout(timeoutId);
+            server.close();
+            browser?.close();
+            reject(new Error("OAuth2 state mismatch — possible CSRF attack."));
+            return;
+          }
+          if (!receivedCode) {
+            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(buildCallbackExchangeErrorHtml("No authorization code received in callback."));
+            clearTimeout(timeoutId);
+            server.close();
+            browser?.close();
+            reject(new Error("No authorization code received in callback."));
+            return;
+          }
 
-        if (receivedState !== state) {
-          reject(new Error("OAuth2 state mismatch — possible CSRF attack."));
-        } else if (!receivedCode) {
-          reject(new Error("No authorization code received in callback."));
-        } else {
-          resolve(receivedCode);
+          const exchanged = await exchangeCodeForToken(
+            base,
+            receivedCode,
+            client.clientId,
+            client.clientSecret,
+            redirectUri,
+            undefined,
+            options?.tlsInsecure,
+          );
+
+          const copyCommand = buildCopyCommand(
+            base,
+            client.clientId,
+            client.clientSecret,
+            exchanged.refreshToken,
+            options?.tlsInsecure,
+          );
+
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(buildCallbackHtml(copyCommand));
+
+          clearTimeout(timeoutId);
+          server.close();
+          browser?.close();
+          resolve(exchanged);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          try {
+            res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(buildCallbackExchangeErrorHtml(message));
+          } catch {
+            /* response may already be sent */
+          }
+          clearTimeout(timeoutId);
+          server.close();
+          browser?.close();
+          reject(err instanceof Error ? err : new Error(message));
         }
-      } else {
-        res.writeHead(404);
-        res.end();
-      }
+      })();
     });
-
-    let browser: any;
 
     server.listen(port, "127.0.0.1", async () => {
       try {
@@ -422,20 +596,65 @@ export async function playwrightLogin(
     });
   });
 
-  // Step 5: Exchange authorization code for tokens (includes refresh_token)
-  const token = await exchangeCodeForToken(
-    base,
-    code,
-    client.clientId,
-    client.clientSecret,
-    redirectUri,
-    undefined,
-    options?.tlsInsecure,
-  );
+  if (hasCredentials) {
+    const copyCommand = buildCopyCommand(
+      base,
+      client.clientId,
+      client.clientSecret,
+      token.refreshToken,
+      options?.tlsInsecure,
+    );
+    process.stderr.write(
+      "\nHeadless login: copy this command and run it on a machine without a browser, or use `kweaver auth export`:\n\n" +
+        copyCommand +
+        "\n\n",
+    );
+  }
 
   setCurrentPlatform(base);
   return token;
   });
+}
+
+/**
+ * Log in on a headless machine using OAuth2 client credentials and a refresh token (no browser).
+ * Exchanges the refresh token for a new access token and persists ~/.kweaver/ state.
+ */
+export async function refreshTokenLogin(
+  baseUrl: string,
+  options: {
+    clientId: string;
+    clientSecret: string;
+    refreshToken: string;
+    tlsInsecure?: boolean;
+  },
+): Promise<TokenConfig> {
+  const base = normalizeBaseUrl(baseUrl);
+  const redirectUri = `http://127.0.0.1:${DEFAULT_REDIRECT_PORT}/callback`;
+  const client: ClientConfig = {
+    baseUrl: base,
+    clientId: options.clientId,
+    clientSecret: options.clientSecret,
+    redirectUri,
+    logoutRedirectUri: redirectUri.replace("/callback", "/successful-logout"),
+    scope: DEFAULT_SCOPE,
+    lang: "zh-cn",
+    product: "adp",
+    xForwardedPrefix: "",
+  };
+  saveClientConfig(base, client);
+  const synthetic: TokenConfig = {
+    baseUrl: base,
+    accessToken: "",
+    tokenType: "Bearer",
+    scope: "",
+    refreshToken: options.refreshToken,
+    obtainedAt: new Date().toISOString(),
+    ...(options.tlsInsecure ? { tlsInsecure: true } : {}),
+  };
+  const token = await runWithTlsInsecure(options.tlsInsecure, () => refreshAccessToken(synthetic));
+  setCurrentPlatform(base);
+  return token;
 }
 
 function tokenNeedsRefresh(token: TokenConfig): boolean {
@@ -544,6 +763,15 @@ export async function refreshAccessToken(token: TokenConfig): Promise<TokenConfi
   return newToken;
 }
 
+/**
+ * Resolve a usable access token for the current platform.
+ *
+ * **Default behavior** (saved `~/.kweaver/` session from OAuth2 code login): when the access
+ * token is expired or near expiry, automatically exchanges the saved **refresh_token** for a new
+ * access token (OAuth2 `refresh_token` grant) and persists it. No extra flags are required.
+ *
+ * Static env `KWEAVER_TOKEN` bypasses refresh (see implementation).
+ */
 export async function ensureValidToken(opts?: { forceRefresh?: boolean }): Promise<TokenConfig> {
   const envToken = process.env.KWEAVER_TOKEN;
   const envBaseUrl = process.env.KWEAVER_BASE_URL;

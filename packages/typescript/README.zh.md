@@ -31,6 +31,18 @@ export KWEAVER_BASE_URL=https://your-kweaver-instance.com
 export KWEAVER_TOKEN=your-token
 ```
 
+### 业务域（平台配置）
+
+在调用依赖租户范围的接口前，应先确认业务域；DIP 环境通常使用 **UUID**，不能长期只依赖默认 `bd_public`。
+
+```bash
+kweaver config show
+kweaver config list-bd
+kweaver config set-bd <uuid>
+```
+
+`kweaver auth login` 成功后，若尚未配置，CLI 可能自动选择业务域。也可用环境变量 `KWEAVER_BUSINESS_DOMAIN` 或各命令的 `-bd` / `--biz-domain` 覆盖。详见 [`../../skills/kweaver-core/references/config.md`](../../skills/kweaver-core/references/config.md)。
+
 ### 简洁 API（推荐）
 
 ```typescript
@@ -101,6 +113,11 @@ const exact = await client.dataviews.find("orders", {
   wait: true,
 });
 const dv = await client.dataviews.get(viewId);
+const queryRows = await client.dataviews.query(viewId, {
+  sql: "SELECT id, name FROM orders LIMIT 10",
+  limit: 10,
+  needTotal: true,
+});
 
 // Context Loader（通过 MCP 对 BKN 做语义搜索）
 const cl      = client.contextLoader(mcpUrl, "bkn-id");
@@ -110,10 +127,14 @@ const results = await cl.search({ query: "高血压 治疗" });
 ## 命令速查
 
 ```
-kweaver auth login <url> [--alias name] [-u user] [-p pass] [--playwright] [--insecure|-k] — 另有 status、list、use、delete、logout
+kweaver auth login <url> [--alias name] [-u user] [-p pass] [--playwright] [--insecure|-k]
+kweaver auth login <url> --client-id ID --client-secret S --refresh-token T   (无浏览器登录)
+kweaver auth export [url|alias] [--json]   (导出在无浏览器机器上运行的命令)
+kweaver auth status/list/use/delete/logout
+kweaver config show / list-bd / set-bd <value>   # 平台业务域，登录后优先
 kweaver token
 kweaver ds list/get/delete/tables/connect
-kweaver dataview list/find/get/delete
+kweaver dataview list/find/get/query/delete
 kweaver bkn list/get/stats/export/create/update/delete
 kweaver bkn object-type list/get/create/update/delete/query/properties
 kweaver bkn relation-type list/get/create/update/delete
@@ -161,6 +182,23 @@ kweaver call <path> [-X METHOD] [-d BODY] [-H header]
    ```
 
 > **安全提示：** 以上方式均会跳过 HTTPS 证书校验，仅适用于开发/内网环境。生产环境请使用受信任的 CA 签发证书。
+
+### 无浏览器 / 服务器端认证
+
+适用于 SSH 远程服务器、CI 环境等无浏览器场景：
+
+**第一步 — 有浏览器的机器：** 正常运行 `kweaver auth login`。登录成功后，回调页面会显示一条可复制的命令（含 `--client-id`、`--client-secret`、`--refresh-token`）。也可以用 `kweaver auth export` 查看。
+
+**第二步 — 在没有浏览器的那台机器上：** 在 SSH 服务器、CI 等环境中执行下面这条命令：
+
+```bash
+kweaver auth login https://your-platform \
+  --client-id abc123 \
+  --client-secret def456 \
+  --refresh-token ghi789
+```
+
+SDK 会用 refresh token 换取新的 access token 并保存到本地，之后自动续期正常工作。
 
 ## 在 AI 智能体中使用
 

@@ -273,6 +273,169 @@ test("run auth logout clears token for current platform", async () => {
   assert.equal(store.getCurrentPlatform(), "https://dip.aishu.cn");
 });
 
+test("run auth export prints headless hint and copy command when credentials exist", async () => {
+  const configDir = createConfigDir();
+  const store = await importStoreModule(configDir);
+  const auth = await importAuthModule(configDir);
+  const base = "https://export-test.example.com";
+  store.saveClientConfig(base, {
+    baseUrl: base,
+    clientId: "exp-cid",
+    clientSecret: "exp-sec",
+  });
+  store.saveTokenConfig({
+    baseUrl: base,
+    accessToken: "at",
+    tokenType: "Bearer",
+    scope: "s",
+    refreshToken: "exp-rt",
+    obtainedAt: new Date().toISOString(),
+  });
+  store.setCurrentPlatform(base);
+
+  const lines: string[] = [];
+  const origLog = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    assert.equal(await auth.runAuthCommand(["export"]), 0);
+  } finally {
+    console.log = origLog;
+  }
+  const joined = lines.join("\n");
+  assert.match(joined, /exp-cid/);
+  assert.match(joined, /exp-sec/);
+  assert.match(joined, /exp-rt/);
+  assert.match(joined, /On a machine without a browser/);
+  assert.match(joined, /--refresh-token/);
+});
+
+test("run auth export --json prints valid JSON credentials", async () => {
+  const configDir = createConfigDir();
+  const store = await importStoreModule(configDir);
+  const auth = await importAuthModule(configDir);
+  const base = "https://json-export.example.com";
+  store.saveClientConfig(base, {
+    baseUrl: base,
+    clientId: "j-cid",
+    clientSecret: "j-sec",
+  });
+  store.saveTokenConfig({
+    baseUrl: base,
+    accessToken: "at",
+    tokenType: "Bearer",
+    scope: "",
+    refreshToken: "j-rt",
+    obtainedAt: new Date().toISOString(),
+  });
+  store.setCurrentPlatform(base);
+
+  let jsonLine = "";
+  const origLog = console.log;
+  console.log = (...args: unknown[]) => {
+    jsonLine = args.map(String).join(" ");
+  };
+  try {
+    assert.equal(await auth.runAuthCommand(["export", "--json"]), 0);
+  } finally {
+    console.log = origLog;
+  }
+  const data = JSON.parse(jsonLine) as {
+    baseUrl: string;
+    clientId: string;
+    clientSecret: string;
+    refreshToken: string;
+  };
+  assert.equal(data.baseUrl, base);
+  assert.equal(data.clientId, "j-cid");
+  assert.equal(data.clientSecret, "j-sec");
+  assert.equal(data.refreshToken, "j-rt");
+});
+
+test("run auth export fails when refresh token is missing", async () => {
+  const configDir = createConfigDir();
+  const store = await importStoreModule(configDir);
+  const auth = await importAuthModule(configDir);
+  const base = "https://no-rt.example.com";
+  store.saveClientConfig(base, {
+    baseUrl: base,
+    clientId: "c",
+    clientSecret: "s",
+  });
+  store.saveTokenConfig({
+    baseUrl: base,
+    accessToken: "at",
+    tokenType: "Bearer",
+    scope: "",
+    obtainedAt: new Date().toISOString(),
+  });
+  store.setCurrentPlatform(base);
+
+  assert.equal(await auth.runAuthCommand(["export"]), 1);
+});
+
+test("run auth login --refresh-token without --client-secret exits 1", async () => {
+  const configDir = createConfigDir();
+  await importStoreModule(configDir);
+  const auth = await importAuthModule(configDir);
+
+  const code = await auth.runAuthCommand([
+    "https://headless.example.com",
+    "--refresh-token",
+    "rt-only",
+    "--client-id",
+    "cid-only",
+  ]);
+  assert.equal(code, 1);
+});
+
+test("run auth login with --refresh-token exchanges and saves access token", async () => {
+  const configDir = createConfigDir();
+  const store = await importStoreModule(configDir);
+  const auth = await importAuthModule(configDir);
+  const base = "https://headless-login.example.com";
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const u = typeof input === "string" ? input : input.toString();
+    assert.ok(u.includes("/oauth2/token"));
+    return new Response(
+      JSON.stringify({
+        access_token: "cli-new-at",
+        token_type: "Bearer",
+        expires_in: 3600,
+        refresh_token: "cli-new-rt",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+  try {
+    assert.equal(
+      await auth.runAuthCommand([
+        base,
+        "--client-id",
+        "h-cid",
+        "--client-secret",
+        "h-sec",
+        "--refresh-token",
+        "h-rt",
+      ]),
+      0,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(store.getCurrentPlatform(), base);
+  const tok = store.loadTokenConfig(base);
+  assert.equal(tok?.accessToken, "cli-new-at");
+  assert.equal(tok?.refreshToken, "cli-new-rt");
+  const client = store.loadClientConfig(base);
+  assert.equal(client?.clientId, "h-cid");
+  assert.equal(client?.clientSecret, "h-sec");
+});
+
 test("formatHttpError expands network request failures with url and cause", () => {
   const message = formatHttpError(
     new NetworkRequestError(
@@ -338,7 +501,7 @@ test("formatVerboseRequest prints method url headers and body state", () => {
 test("parseKnListArgs parses flags with defaults", () => {
   const opts = parseKnListArgs([]);
   assert.equal(opts.offset, 0);
-  assert.equal(opts.limit, 50);
+  assert.equal(opts.limit, 30);
   assert.equal(opts.sort, "update_time");
   assert.equal(opts.direction, "desc");
   assert.equal(opts.businessDomain, "bd_public");
@@ -522,10 +685,10 @@ test("parseKnObjectTypeQueryArgs allows body omission when --limit is provided",
   assert.deepEqual(JSON.parse(opts.body), { limit: 20 });
 });
 
-test("parseKnObjectTypeQueryArgs defaults limit to 30 when omitted", () => {
+test("parseKnObjectTypeQueryArgs defaults limit to 50 when omitted", () => {
   const opts = parseKnObjectTypeQueryArgs(["kn-123", "pod", '{"condition":{"operation":"and","sub_conditions":[]}}']);
   const body = JSON.parse(opts.body);
-  assert.strictEqual(body.limit, 30);
+  assert.strictEqual(body.limit, 50);
 });
 
 test("parseKnObjectTypeQueryArgs validates --search-after json array", () => {
@@ -539,7 +702,7 @@ test("parseAgentListArgs parses flags with defaults", () => {
   const opts = parseAgentListArgs([]);
   assert.equal(opts.name, "");
   assert.equal(opts.offset, 0);
-  assert.equal(opts.limit, 50);
+  assert.equal(opts.limit, 30);
   assert.equal(opts.category_id, "");
   assert.equal(opts.custom_space_id, "");
   assert.equal(opts.is_to_square, 1);
@@ -1013,7 +1176,7 @@ test("parseAgentSessionsArgs parses positional agent_id", () => {
   assert.equal(opts.agentId, "agent-123");
   assert.equal(opts.businessDomain, "bd_public");
   assert.equal(opts.pretty, true);
-  assert.equal(opts.limit, undefined);
+  assert.equal(opts.limit, 30);
 });
 
 test("parseAgentSessionsArgs parses --limit and -bd", () => {
@@ -1030,7 +1193,7 @@ test("parseAgentHistoryArgs parses positional conversation_id", () => {
   const opts = parseAgentHistoryArgs(["conv-abc"]);
   assert.equal(opts.conversationId, "conv-abc");
   assert.equal(opts.pretty, true);
-  assert.equal(opts.limit, undefined);
+  assert.equal(opts.limit, 30);
 });
 
 test("parseAgentHistoryArgs parses --limit", () => {

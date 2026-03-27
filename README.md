@@ -81,7 +81,30 @@ kweaver auth login https://your-kweaver-instance.com
 kweaver auth login https://your-kweaver-instance.com --alias prod
 ```
 
-Or use environment variables: `KWEAVER_BASE_URL`, `KWEAVER_BUSINESS_DOMAIN`, `KWEAVER_TOKEN`. For TLS in the Node `kweaver` CLI, see `KWEAVER_TLS_INSECURE` and `NODE_TLS_REJECT_UNAUTHORIZED` in the [TypeScript README](packages/typescript/README.md#environment-variables).
+Or use environment variables: `KWEAVER_BASE_URL`, `KWEAVER_BUSINESS_DOMAIN`, `KWEAVER_TOKEN`. With saved `~/.kweaver/` sessions from OAuth2 browser login, **the default is to exchange `refresh_token` for a new access token** when the access token expires (no extra flags). For TLS in the Node `kweaver` CLI, see `KWEAVER_TLS_INSECURE` and `NODE_TLS_REJECT_UNAUTHORIZED` in the [TypeScript README](packages/typescript/README.md#environment-variables).
+
+### Headless hosts (SSH, CI, containers — no browser)
+
+The **npm `kweaver` CLI** supports logging in on a machine that cannot open a browser:
+
+1. On any machine **with** a browser, run `kweaver auth login https://your-instance`. After success, the local callback page shows a one-line command you can copy (or run `kweaver auth export` / `kweaver auth export --json`).
+2. On the **headless** machine, run that command — it uses `--client-id`, `--client-secret`, and `--refresh-token` to exchange for tokens and save `~/.kweaver/` as usual.
+
+Details: [`packages/typescript/README.md`](packages/typescript/README.md) (section **Headless / Server Authentication**). The Python `kweaver` CLI still uses interactive browser login; you can reuse the same `~/.kweaver/` directory copied from a machine where the Node CLI completed login.
+
+## Platform configuration (business domain)
+
+Most API calls send `x-business-domain`. **Set or verify this right after login** — wrong or default-only `bd_public` often explains empty lists on DIP-style deployments.
+
+```bash
+kweaver config show              # current platform + resolved business domain
+kweaver config list-bd         # list domains from the platform (needs login)
+kweaver config set-bd <uuid>   # persist default for this platform
+```
+
+Priority: `KWEAVER_BUSINESS_DOMAIN` env → per-platform `~/.kweaver/.../config.json` → `bd_public`. After a successful `kweaver auth login`, the CLI tries to auto-pick a domain (prefer `bd_public` in the list, else the first entry) when nothing is configured yet.
+
+See [`skills/kweaver-core/references/config.md`](skills/kweaver-core/references/config.md).
 
 ## TypeScript SDK Usage
 
@@ -211,12 +234,14 @@ result = client.dataflows.execute(
 ## CLI Quick Reference
 
 ```bash
-kweaver auth login <url> [--alias name] [-u user] [-p pass] [--playwright] [--insecure|-k] — also: status, list, use, delete, logout
+kweaver auth login <url> [--alias name] [-u user] [-p pass] [--playwright] [--insecure|-k]
+kweaver auth login <url> --client-id ID --client-secret S --refresh-token T   (headless host)
+kweaver auth export [url|alias] [--json]   auth status/list/use/delete/logout
+kweaver config show / list-bd / set-bd <value>   # platform business domain — run after login
 kweaver token
-kweaver config show / set-bd <value>
 kweaver ds list/get/delete/tables/connect
 kweaver ds import-csv <ds_id> --files <glob> [--table-prefix <p>] [--batch-size 500]
-kweaver dataview list/find/get/delete
+kweaver dataview list/find/get/query/delete
 kweaver bkn list/get/stats/export/create/update/delete
 kweaver bkn create-from-ds <ds_id> --name <name> [--tables t1,t2] [--build]
 kweaver bkn create-from-csv <ds_id> --files <glob> --name <name> [--build]
@@ -244,7 +269,7 @@ The two CLIs use different top-level command names for some features. The table 
 | `kweaver query kn-search <kn_id> <query>` (REST) | `kweaver context-loader kn-search <query>` (MCP context-loader), or SDK `client.bkn.knSearch` — not the same transport |
 | `kweaver action query …` / `execute` / `logs` … | `kweaver bkn action-type query|execute …`, `kweaver bkn action-log list|get|…` |
 
-**Only on TypeScript CLI:** `kweaver config`, `kweaver vega`, `kweaver dataview`, `kweaver ds import-csv`, `kweaver bkn create-from-csv`, and full `kweaver agent` create/update/delete/publish (see `kweaver agent --help`).
+**Only on TypeScript CLI:** `kweaver vega`, `kweaver dataview list|find|get|delete`, `kweaver ds import-csv`, `kweaver bkn create-from-csv`, and full `kweaver agent` create/update/delete/publish (see `kweaver agent --help`). Both CLIs support `kweaver config show|list-bd|set-bd` and `kweaver dataview query` (SQL via mdl-uniquery; Python requires `pip install kweaver-sdk[cli]`).
 
 ## Repository Structure (Monorepo)
 
