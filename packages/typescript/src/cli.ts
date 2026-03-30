@@ -83,7 +83,7 @@ Usage:
 
   kweaver vega health|stats|inspect
   kweaver vega catalog list|get|health|test-connection|discover|resources [options]
-  kweaver vega resource list|get|query|preview [options]
+  kweaver vega resource list|get|query [options]
   kweaver vega connector-type list|get [options]
 
   kweaver context-loader config set|use|list|remove|show [options]

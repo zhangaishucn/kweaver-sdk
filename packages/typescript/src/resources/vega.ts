@@ -9,7 +9,6 @@ import {
   listVegaResources,
   getVegaResource,
   queryVegaResourceData,
-  previewVegaResource,
   listVegaConnectorTypes,
   getVegaConnectorType,
   listVegaDiscoverTasks,
@@ -92,11 +91,6 @@ export class VegaResource {
 
   async queryResourceData(id: string, body: string): Promise<unknown> {
     const raw = await queryVegaResourceData({ ...this.ctx.base(), id, body });
-    return JSON.parse(raw);
-  }
-
-  async previewResource(id: string, opts: { limit?: number } = {}): Promise<unknown> {
-    const raw = await previewVegaResource({ ...this.ctx.base(), id, ...opts });
     return JSON.parse(raw);
   }
 

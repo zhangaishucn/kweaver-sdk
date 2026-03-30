@@ -522,7 +522,10 @@ def test_client_vega_falls_back_to_base_url():
 # ── Missing Vega resource method tests ──
 
 def test_catalog_health_status():
+    """health_status() must use GET /catalogs/{ids}/health-status (ids in path, not query)."""
     def handler(req):
+        # ids must be in the path segment, not as a query parameter
+        assert req.url.path == "/api/vega-backend/v1/catalogs/c-1/health-status"
         return httpx.Response(200, json={"entries": [
             {"id": "c-1", "name": "prod", "type": "physical", "connector_type": "mysql",
              "status": "active", "health_status": "healthy"}
@@ -532,6 +535,22 @@ def test_catalog_health_status():
     cats = ns.catalogs.health_status(["c-1"])
     assert len(cats) == 1
     assert cats[0].health_status == "healthy"
+
+
+def test_catalog_health_status_multiple_ids():
+    """health_status() with multiple ids joins them comma-separated in the path."""
+    def handler(req):
+        assert req.url.path == "/api/vega-backend/v1/catalogs/c-1,c-2/health-status"
+        return httpx.Response(200, json={"entries": [
+            {"id": "c-1", "name": "a", "type": "physical", "connector_type": "mysql",
+             "status": "active", "health_status": "healthy"},
+            {"id": "c-2", "name": "b", "type": "physical", "connector_type": "pg",
+             "status": "active", "health_status": "unhealthy"},
+        ]})
+    from kweaver.resources.vega import VegaNamespace
+    ns = VegaNamespace(_make_vega_http(handler))
+    cats = ns.catalogs.health_status(["c-1", "c-2"])
+    assert len(cats) == 2
 
 def test_catalog_test_connection():
     def handler(req):
@@ -567,13 +586,10 @@ def test_resource_data():
     result = ns.resources.data("r-1", body={"query": {}})
     assert result.total_count == 1
 
-def test_resource_preview():
-    def handler(req):
-        return httpx.Response(200, json={"entries": [{"a": 1}], "total_count": 1})
-    from kweaver.resources.vega import VegaNamespace
-    ns = VegaNamespace(_make_vega_http(handler))
-    result = ns.resources.preview("r-1")
-    assert isinstance(result.entries, list)
+def test_resource_has_no_preview_method():
+    """preview() was removed — the backend has no /resources/{id}/preview endpoint."""
+    from kweaver.resources.vega.resources import VegaResourcesResource
+    assert not hasattr(VegaResourcesResource, "preview")
 
 def test_task_get_discover():
     def handler(req):

@@ -43,7 +43,3 @@ class VegaResourcesResource:
         result = self._http.post(f"{self._BASE}/{id}/data", json=body)
         return VegaQueryResult(**result) if isinstance(result, dict) else VegaQueryResult()
 
-    def preview(self, id: str, *, limit: int = 10) -> VegaQueryResult:
-        params: dict[str, Any] = {"limit": limit}
-        result = self._http.get(f"{self._BASE}/{id}/preview", params=params)
-        return VegaQueryResult(**result) if isinstance(result, dict) else VegaQueryResult()

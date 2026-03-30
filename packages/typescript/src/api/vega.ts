@@ -129,8 +129,8 @@ export async function vegaCatalogHealthStatus(options: VegaCatalogHealthStatusOp
   } = options;
 
   const base = baseUrl.replace(/\/+$/, "");
-  const url = new URL(`${base}${VEGA_BASE}/catalogs/health-status`);
-  url.searchParams.set("ids", ids);
+  // ids go in the path segment: GET /catalogs/{ids}/health-status
+  const url = new URL(`${base}${VEGA_BASE}/catalogs/${ids}/health-status`);
 
   const response = await fetch(url.toString(), {
     method: "GET",
@@ -367,38 +367,6 @@ export async function queryVegaResourceData(options: QueryVegaResourceDataOption
   return body;
 }
 
-export interface PreviewVegaResourceOptions {
-  baseUrl: string;
-  accessToken: string;
-  id: string;
-  limit?: number;
-  businessDomain?: string;
-}
-
-export async function previewVegaResource(options: PreviewVegaResourceOptions): Promise<string> {
-  const {
-    baseUrl,
-    accessToken,
-    id,
-    limit = 50,
-    businessDomain = "bd_public",
-  } = options;
-
-  const base = baseUrl.replace(/\/+$/, "");
-  const url = new URL(`${base}${VEGA_BASE}/resources/${encodeURIComponent(id)}/preview`);
-  url.searchParams.set("limit", String(limit));
-
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: buildHeaders(accessToken, businessDomain),
-  });
-
-  const body = await response.text();
-  if (!response.ok) {
-    throw new HttpError(response.status, response.statusText, body);
-  }
-  return body;
-}
 
 // ---------------------------------------------------------------------------
 // Connector Types

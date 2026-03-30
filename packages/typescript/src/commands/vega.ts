@@ -10,7 +10,6 @@ import {
   listVegaResources,
   getVegaResource,
   queryVegaResourceData,
-  previewVegaResource,
   listVegaConnectorTypes,
   getVegaConnectorType,
   listVegaDiscoverTasks,
@@ -38,7 +37,6 @@ Subcommands:
   resource list [--catalog-id X] [--category X] [--status X] [--limit N] [--offset N]
   resource get <id>
   resource query <id> -d <json-body>  Query resource data
-  resource preview <id> [--limit N]   Preview resource data
   connector-type list                 List connector types
   connector-type get <type>           Get connector type details
 
@@ -496,15 +494,13 @@ async function runVegaResourceCommand(args: string[]): Promise<number> {
 Subcommands:
   list [--catalog-id X] [--category X] [--status X] [--limit N] [--offset N]
   get <id>
-  query <id> -d <json-body>
-  preview <id> [--limit N]`);
+  query <id> -d <json-body>`);
     return 0;
   }
 
   if (sub === "list") return await runResourceList(rest);
   if (sub === "get") return await runResourceGet(rest);
   if (sub === "query") return await runResourceQuery(rest);
-  if (sub === "preview") return await runResourcePreview(rest);
 
   console.error(`Unknown resource subcommand: ${sub}`);
   return 1;
@@ -643,52 +639,6 @@ Options:
     accessToken: token.accessToken,
     id,
     body: data,
-    businessDomain,
-  });
-  console.log(formatCallOutput(body, pretty));
-  return 0;
-}
-
-// ---------------------------------------------------------------------------
-// resource preview
-// ---------------------------------------------------------------------------
-
-async function runResourcePreview(args: string[]): Promise<number> {
-  if (args.includes("--help") || args.includes("-h")) {
-    console.log(`kweaver vega resource preview <id> [--limit N]
-
-Options:
-  --limit <n>   Number of rows to preview (default: 50)`);
-    return 0;
-  }
-
-  let limit: number | undefined;
-  const { remaining, businessDomain, pretty } = parseCommonFlags(args);
-
-  const positionals: string[] = [];
-  for (let i = 0; i < remaining.length; i += 1) {
-    const arg = remaining[i];
-    if (arg === "--limit" && remaining[i + 1]) {
-      limit = parseInt(remaining[++i], 10);
-      continue;
-    }
-    if (!arg.startsWith("-")) {
-      positionals.push(arg);
-    }
-  }
-
-  const id = positionals[0];
-  if (!id) {
-    console.error("Usage: kweaver vega resource preview <id> [--limit N]");
-    return 1;
-  }
-
-  const token = await ensureValidToken();
-  const body = await previewVegaResource({
-    baseUrl: token.baseUrl,
-    accessToken: token.accessToken,
-    id,
-    limit,
     businessDomain,
   });
   console.log(formatCallOutput(body, pretty));

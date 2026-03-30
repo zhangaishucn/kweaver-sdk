@@ -34,8 +34,9 @@ class VegaCatalogsResource:
         return VegaCatalog(**data)
 
     def health_status(self, ids: list[str]) -> list[VegaCatalog]:
-        params: dict[str, Any] = {"ids": ",".join(ids)}
-        data = self._http.get(f"{self._BASE}/health-status", params=params)
+        # ids go in the path segment: GET /catalogs/{ids}/health-status
+        ids_path = ",".join(ids)
+        data = self._http.get(f"{self._BASE}/{ids_path}/health-status")
         entries = data.get("entries", data.get("data", [])) if isinstance(data, dict) else data
         return [VegaCatalog(**e) for e in entries]
 
