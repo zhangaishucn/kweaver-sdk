@@ -241,8 +241,9 @@ kweaver config show / list-bd / set-bd <value>   # platform business domain — 
 kweaver token
 kweaver ds list/get/delete/tables/connect
 kweaver ds import-csv <ds_id> --files <glob> [--table-prefix <p>] [--batch-size 500]
-kweaver dataview list/find/get/query/delete
+kweaver dataview|dv list/find/get/query/delete
 kweaver bkn list/get/stats/export/create/update/delete
+kweaver bkn build [--wait] [--timeout 300]
 kweaver bkn create-from-ds <ds_id> --name <name> [--tables t1,t2] [--build]
 kweaver bkn create-from-csv <ds_id> --files <glob> --name <name> [--build]
 kweaver bkn validate/push/pull
