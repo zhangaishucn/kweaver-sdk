@@ -702,7 +702,7 @@ Options:
 
   if (!skipConfirm) {
     const ok = await confirmYes(`Delete catalog(s) ${ids}?`);
-    if (!ok) return 0;
+    if (!ok) { console.error("Aborted."); return 1; }
   }
 
   const token = await ensureValidToken();

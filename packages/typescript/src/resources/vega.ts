@@ -67,7 +67,7 @@ export class VegaResource {
     description?: string;
   }): Promise<unknown> {
     const raw = await createVegaCatalog({ ...this.ctx.base(), body: JSON.stringify(data) });
-    return JSON.parse(raw);
+    return raw ? JSON.parse(raw) : {};
   }
 
   async updateCatalog(id: string, body: string): Promise<unknown> {
@@ -128,7 +128,7 @@ export class VegaResource {
 
   async createResource(body: string): Promise<unknown> {
     const raw = await createVegaResource({ ...this.ctx.base(), body });
-    return JSON.parse(raw);
+    return raw ? JSON.parse(raw) : {};
   }
 
   async updateResource(id: string, body: string): Promise<unknown> {
