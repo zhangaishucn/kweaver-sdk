@@ -425,6 +425,7 @@ export async function queryVegaResourceData(options: QueryVegaResourceDataOption
     headers: {
       ...buildHeaders(accessToken, businessDomain),
       "content-type": "application/json",
+      "x-http-method-override": "GET",
     },
     body: requestBody,
   });
