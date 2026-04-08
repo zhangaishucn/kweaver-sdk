@@ -311,12 +311,14 @@ class OAuth2BrowserAuth:
         base_url: str,
         *,
         redirect_port: int = 9010,
+        redirect_uri: str | None = None,
         scope: str = "openid offline all",
         lang: str = "zh-cn",
         tls_insecure: bool = False,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._redirect_port = redirect_port
+        self._redirect_uri = redirect_uri
         self._scope = scope
         self._lang = lang
         self._tls_insecure = tls_insecure
@@ -324,6 +326,55 @@ class OAuth2BrowserAuth:
 
         from kweaver.config.store import PlatformStore
         self._store = PlatformStore()
+
+    def _resolve_redirect_uri(self) -> str:
+        """Return the effective redirect URI (explicit override or port-based default)."""
+        if self._redirect_uri:
+            return self._redirect_uri
+        return f"http://127.0.0.1:{self._redirect_port}/callback"
+
+    @staticmethod
+    def _parse_redirect_uri(uri: str) -> tuple[str, int, str, bool]:
+        """Parse a redirect URI into (host, port, pathname, is_localhost)."""
+        from urllib.parse import urlparse
+        parsed = urlparse(uri)
+        host = parsed.hostname or "127.0.0.1"
+        default_port = 443 if parsed.scheme == "https" else 80
+        port = parsed.port or default_port
+        is_localhost = host in ("127.0.0.1", "localhost", "::1")
+        return host, port, parsed.path or "/callback", is_localhost
+
+    def _wait_for_manual_code(self, auth_url: str, state: str) -> str:
+        """Manual code flow for non-localhost redirect URIs."""
+        from urllib.parse import urlparse, parse_qs
+        import sys
+
+        print(
+            "\nSince the redirect URI is not localhost, you need to complete login manually.\n"
+            "1. Open this URL in your browser:\n\n"
+            f"   {auth_url}\n\n"
+            "2. After login, the browser will redirect to your callback URL.\n"
+            "3. Copy the full callback URL and paste it here:\n",
+            file=sys.stderr,
+        )
+        callback_url = input("Callback URL> ").strip()
+        parsed = urlparse(callback_url)
+        params = parse_qs(parsed.query)
+
+        received_state = params.get("state", [None])[0]
+        if received_state != state:
+            raise RuntimeError("OAuth2 state mismatch — possible CSRF attack")
+
+        error = params.get("error", [None])[0]
+        if error:
+            desc = params.get("error_description", [""])[0]
+            msg = f"Authorization failed: {error} — {desc}" if desc else f"Authorization failed: {error}"
+            raise RuntimeError(msg)
+
+        code = params.get("code", [None])[0]
+        if not code:
+            raise RuntimeError("No authorization code found in the callback URL")
+        return code
 
     def login(self) -> None:
         """Run full OAuth2 browser login flow."""
@@ -338,6 +389,8 @@ class OAuth2BrowserAuth:
         client_id = client_data["clientId"]
         client_secret = client_data["clientSecret"]
         redirect_uri = client_data["redirectUri"]
+
+        _, listen_port, callback_pathname, is_localhost = self._parse_redirect_uri(redirect_uri)
 
         # Step 2: Generate state for CSRF protection
         state = secrets.token_hex(12)
@@ -355,48 +408,49 @@ class OAuth2BrowserAuth:
         }
         auth_url = f"{self._base_url}/oauth2/auth?{urlencode(auth_params)}"
 
-        # Step 4: Start local callback server
-        received = {}
+        if is_localhost:
+            # Step 4a: Local callback server
+            received: dict = {}
 
-        class CallbackHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                parsed = urlparse(self.path)
-                params = parse_qs(parsed.query)
-                if parsed.path == "/callback":
-                    received["code"] = params.get("code", [None])[0]
-                    received["state"] = params.get("state", [None])[0]
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(b"<html><body><h2>Login successful. You can close this tab.</h2></body></html>")
-                else:
-                    self.send_response(404)
-                    self.end_headers()
+            class CallbackHandler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    parsed = urlparse(self.path)
+                    params = parse_qs(parsed.query)
+                    if parsed.path == callback_pathname:
+                        received["code"] = params.get("code", [None])[0]
+                        received["state"] = params.get("state", [None])[0]
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(b"<html><body><h2>Login successful. You can close this tab.</h2></body></html>")
+                    else:
+                        self.send_response(404)
+                        self.end_headers()
 
-            def log_message(self, format, *args):
-                pass  # Suppress server logs
+                def log_message(self, format, *args):
+                    pass
 
-        server = HTTPServer(("127.0.0.1", self._redirect_port), CallbackHandler)
-        server.timeout = 120
+            server = HTTPServer(("127.0.0.1", listen_port), CallbackHandler)
+            server.timeout = 120
 
-        # Step 5: Open browser
-        webbrowser.open(auth_url)
+            webbrowser.open(auth_url)
 
-        # Step 6: Wait for callback
-        while "code" not in received:
-            server.handle_request()
+            while "code" not in received:
+                server.handle_request()
 
-        server.server_close()
+            server.server_close()
 
-        # Validate state
-        if received.get("state") != state:
-            raise RuntimeError("OAuth2 state mismatch — possible CSRF attack")
+            if received.get("state") != state:
+                raise RuntimeError("OAuth2 state mismatch — possible CSRF attack")
 
-        code = received["code"]
-        if not code:
-            raise RuntimeError("No authorization code received")
+            code = received["code"]
+            if not code:
+                raise RuntimeError("No authorization code received")
+        else:
+            # Step 4b: Non-localhost — manual paste flow
+            code = self._wait_for_manual_code(auth_url, state)
 
-        # Step 7: Exchange code for token
+        # Step 5: Exchange code for token
         self._exchange_code(code, client_id, client_secret, redirect_uri)
 
         # Set as active platform
@@ -434,20 +488,27 @@ class OAuth2BrowserAuth:
         """Load cached client or register a new one, with stale-client recovery."""
         import sys
 
+        effective_uri = self._resolve_redirect_uri()
+
         client_data = self._store.load_client(self._base_url)
         if client_data.get("clientId"):
-            redirect_uri = client_data.get(
-                "redirectUri",
-                f"http://127.0.0.1:{self._redirect_port}/callback",
-            )
+            redirect_uri = client_data.get("redirectUri", effective_uri)
             if self._is_client_still_valid(client_data["clientId"], redirect_uri):
-                return client_data
-
-            print(
-                "Cached OAuth2 client is no longer valid on the server. Re-registering…",
-                file=sys.stderr,
-            )
-            self._store.delete_client(self._base_url)
+                # If the stored redirect URI differs from what we want, re-register
+                if redirect_uri != effective_uri:
+                    print(
+                        "Redirect URI changed. Re-registering OAuth2 client…",
+                        file=sys.stderr,
+                    )
+                    self._store.delete_client(self._base_url)
+                else:
+                    return client_data
+            else:
+                print(
+                    "Cached OAuth2 client is no longer valid on the server. Re-registering…",
+                    file=sys.stderr,
+                )
+                self._store.delete_client(self._base_url)
 
         client_data = self._register_client()
         self._store.save_client(self._base_url, client_data)
@@ -455,8 +516,8 @@ class OAuth2BrowserAuth:
 
     def _register_client(self) -> dict:
         """Register OAuth2 client with the platform."""
-        redirect_uri = f"http://127.0.0.1:{self._redirect_port}/callback"
-        logout_uri = f"http://127.0.0.1:{self._redirect_port}/successful-logout"
+        redirect_uri = self._resolve_redirect_uri()
+        logout_uri = redirect_uri.rsplit("/", 1)[0] + "/successful-logout"
 
         verify = not self._tls_insecure
         resp = httpx.post(

@@ -256,10 +256,66 @@ async function resolveOrRegisterClient(
 }
 
 /**
+ * Parse a redirect URI to extract host, port, and pathname.
+ * Returns null if the URI is not a valid HTTP(S) URL.
+ */
+function parseRedirectUri(uri: string): { host: string; port: number; pathname: string; isLocalhost: boolean } | null {
+  try {
+    const parsed = new URL(uri);
+    const host = parsed.hostname;
+    const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
+    const isLocalhost = host === "127.0.0.1" || host === "localhost" || host === "::1";
+    return { host, port, pathname: parsed.pathname, isLocalhost };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Manual code flow for non-localhost redirect URIs.
+ * Prints the auth URL, then reads the full callback URL from stdin
+ * to extract the authorization code.
+ */
+async function waitForManualCode(authUrl: string, state: string): Promise<string> {
+  const { createInterface } = await import("node:readline");
+  process.stderr.write(
+    "\nSince the redirect URI is not localhost, you need to complete login manually.\n" +
+    "1. Open this URL in your browser:\n\n" +
+    `   ${authUrl}\n\n` +
+    "2. After login, the browser will redirect to your callback URL.\n" +
+    "3. Copy the full callback URL and paste it here:\n\n",
+  );
+
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const callbackUrl = await new Promise<string>((resolve) => {
+    rl.question("Callback URL> ", (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+
+  const parsed = new URL(callbackUrl);
+  const receivedState = parsed.searchParams.get("state");
+  if (receivedState !== state) {
+    throw new Error("OAuth2 state mismatch — possible CSRF attack.");
+  }
+  const error = parsed.searchParams.get("error");
+  if (error) {
+    const desc = parsed.searchParams.get("error_description") ?? "";
+    throw new Error(desc ? `Authorization failed: ${error} — ${desc}` : `Authorization failed: ${error}`);
+  }
+  const code = parsed.searchParams.get("code");
+  if (!code) {
+    throw new Error("No authorization code found in the callback URL.");
+  }
+  return code;
+}
+
+/**
  * OAuth2 Authorization Code login flow.
  * 1. Register client (if not already registered), OR use a provided client ID
  * 2. Open browser to /oauth2/auth
- * 3. Receive authorization code via local HTTP callback
+ * 3. Receive authorization code via local HTTP callback (or manual paste for non-localhost)
  * 4. Exchange code for access_token + refresh_token
  * 5. Save token.json + client.json to ~/.kweaver/
  */
@@ -267,6 +323,8 @@ export async function oauth2Login(
   baseUrl: string,
   options?: {
     port?: number;
+    /** Full redirect URI override (e.g. "http://127.0.0.1:8080/callback" or a remote URL). */
+    redirectUri?: string;
     scope?: string;
     clientId?: string;
     clientSecret?: string;
@@ -281,7 +339,13 @@ export async function oauth2Login(
   const base = normalizeBaseUrl(baseUrl);
   const port = options?.port ?? DEFAULT_REDIRECT_PORT;
   const scope = options?.scope ?? DEFAULT_SCOPE;
-  const redirectUri = `http://127.0.0.1:${port}/callback`;
+
+  // Determine redirect URI: explicit option > port-based default
+  const redirectUri = options?.redirectUri ?? `http://127.0.0.1:${port}/callback`;
+  const parsedRedirect = parseRedirectUri(redirectUri);
+  const isLocalRedirect = parsedRedirect?.isLocalhost ?? true;
+  const listenPort = parsedRedirect?.port ?? port;
+  const callbackPathname = parsedRedirect?.pathname ?? "/callback";
 
   // Step 1: Determine client — use provided client ID or fall back to dynamic registration
   let client = await resolveOrRegisterClient(base, redirectUri, scope, options);
@@ -310,104 +374,105 @@ export async function oauth2Login(
   }
   const authUrl = `${base}/oauth2/auth?${authParams.toString()}`;
 
-  // Step 4: Start local callback server; exchange code inside handler, then show credentials HTML
-  const token = await new Promise<TokenConfig>((resolve, reject) => {
-    let server: Server;
-    const timeoutId = setTimeout(() => {
-      server?.close();
-      reject(new Error("OAuth2 login timed out (120s). No authorization code received."));
-    }, 120_000);
+  let token: TokenConfig;
 
-    server = createServer((req, res) => {
-      void (async () => {
-        try {
-          const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
-          if (url.pathname !== "/callback") {
-            res.writeHead(404);
-            res.end();
-            return;
-          }
+  if (isLocalRedirect) {
+    // Step 4a: Local callback — start HTTP server to receive the authorization code
+    token = await new Promise<TokenConfig>((resolve, reject) => {
+      let server: Server;
+      const timeoutId = setTimeout(() => {
+        server?.close();
+        reject(new Error("OAuth2 login timed out (120s). No authorization code received."));
+      }, 120_000);
 
-          const receivedState = url.searchParams.get("state");
-          const receivedCode = url.searchParams.get("code");
-          const callbackError = url.searchParams.get("error");
-          const callbackErrorDesc = url.searchParams.get("error_description");
-
-          if (receivedState !== state) {
-            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(buildCallbackExchangeErrorHtml("OAuth2 state mismatch — possible CSRF attack."));
-            clearTimeout(timeoutId);
-            server.close();
-            reject(new Error("OAuth2 state mismatch — possible CSRF attack."));
-            return;
-          }
-          if (callbackError) {
-            const msg = callbackErrorDesc
-              ? `Authorization failed: ${callbackError} — ${callbackErrorDesc}`
-              : `Authorization failed: ${callbackError}`;
-            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(buildCallbackExchangeErrorHtml(msg));
-            clearTimeout(timeoutId);
-            server.close();
-            reject(new Error(msg));
-            return;
-          }
-          if (!receivedCode) {
-            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(buildCallbackExchangeErrorHtml("No authorization code received in callback."));
-            clearTimeout(timeoutId);
-            server.close();
-            reject(new Error("No authorization code received in callback."));
-            return;
-          }
-
-          const exchanged = await exchangeCodeForToken(
-            base,
-            receivedCode,
-            client.clientId,
-            client.clientSecret,
-            redirectUri,
-            pkce?.verifier,
-            options?.tlsInsecure,
-          );
-
-          const copyCommand = buildCopyCommand(
-            base,
-            client.clientId,
-            client.clientSecret,
-            exchanged.refreshToken,
-            options?.tlsInsecure,
-          );
-
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-          res.end(buildCallbackHtml(copyCommand));
-
-          clearTimeout(timeoutId);
-          server.close();
-          resolve(exchanged);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+      server = createServer((req, res) => {
+        void (async () => {
           try {
-            res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(buildCallbackExchangeErrorHtml(message));
-          } catch {
-            /* response may already be sent */
-          }
-          clearTimeout(timeoutId);
-          server.close();
-          reject(err instanceof Error ? err : new Error(message));
-        }
-      })();
-    });
+            const url = new URL(req.url ?? "/", `http://127.0.0.1:${listenPort}`);
+            if (url.pathname !== callbackPathname) {
+              res.writeHead(404);
+              res.end();
+              return;
+            }
 
-    server.listen(port, "127.0.0.1", () => {
-      // Step 5: Open browser (uses spawn with proper Windows quoting)
-      import("../utils/browser.js").then(({ openBrowser }) => {
-        openBrowser(authUrl);
+            const receivedState = url.searchParams.get("state");
+            const code = url.searchParams.get("code");
+            const callbackError = url.searchParams.get("error");
+            const callbackErrorDesc = url.searchParams.get("error_description");
+
+            if (receivedState !== state) {
+              res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+              res.end(buildCallbackExchangeErrorHtml("OAuth2 state mismatch — possible CSRF attack."));
+              clearTimeout(timeoutId);
+              server.close();
+              reject(new Error("OAuth2 state mismatch — possible CSRF attack."));
+              return;
+            }
+            if (callbackError) {
+              const msg = callbackErrorDesc
+                ? `Authorization failed: ${callbackError} — ${callbackErrorDesc}`
+                : `Authorization failed: ${callbackError}`;
+              res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+              res.end(buildCallbackExchangeErrorHtml(msg));
+              clearTimeout(timeoutId);
+              server.close();
+              reject(new Error(msg));
+              return;
+            }
+            if (!code) {
+              res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+              res.end(buildCallbackExchangeErrorHtml("No authorization code received in callback."));
+              clearTimeout(timeoutId);
+              server.close();
+              reject(new Error("No authorization code received in callback."));
+              return;
+            }
+
+            const exchanged = await exchangeCodeForToken(
+              base, code, client.clientId, client.clientSecret,
+              redirectUri, pkce?.verifier, options?.tlsInsecure,
+            );
+            const copyCommand = buildCopyCommand(
+              base, client.clientId, client.clientSecret,
+              exchanged.refreshToken, options?.tlsInsecure,
+            );
+
+            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(buildCallbackHtml(copyCommand));
+
+            clearTimeout(timeoutId);
+            server.close();
+            resolve(exchanged);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            try {
+              res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+              res.end(buildCallbackExchangeErrorHtml(message));
+            } catch {
+              /* response may already be sent */
+            }
+            clearTimeout(timeoutId);
+            server.close();
+            reject(err instanceof Error ? err : new Error(message));
+          }
+        })();
       });
-      process.stderr.write(`If the wrong browser opens, copy this URL to your correct browser:\n  ${authUrl}\n`);
+
+      server.listen(listenPort, "127.0.0.1", () => {
+        import("../utils/browser.js").then(({ openBrowser }) => {
+          openBrowser(authUrl);
+        });
+        process.stderr.write(`If the wrong browser opens, copy this URL to your correct browser:\n  ${authUrl}\n`);
+      });
     });
-  });
+  } else {
+    // Step 4b: Non-localhost redirect — manual code entry flow
+    const code = await waitForManualCode(authUrl, state);
+    token = await exchangeCodeForToken(
+      base, code, client.clientId, client.clientSecret,
+      redirectUri, pkce?.verifier, options?.tlsInsecure,
+    );
+  }
 
   setCurrentPlatform(base);
   return token;
@@ -546,6 +611,8 @@ export async function playwrightLogin(
     username?: string;
     password?: string;
     port?: number;
+    /** Full redirect URI override. */
+    redirectUri?: string;
     scope?: string;
     tlsInsecure?: boolean;
   },
@@ -568,7 +635,10 @@ export async function playwrightLogin(
   const base = normalizeBaseUrl(baseUrl);
   const port = options?.port ?? DEFAULT_REDIRECT_PORT;
   const scope = options?.scope ?? DEFAULT_SCOPE;
-  const redirectUri = `http://127.0.0.1:${port}/callback`;
+  const redirectUri = options?.redirectUri ?? `http://127.0.0.1:${port}/callback`;
+  const parsedRedirect = parseRedirectUri(redirectUri);
+  const listenPort = parsedRedirect?.port ?? port;
+  const callbackPathname = parsedRedirect?.pathname ?? "/callback";
   const hasCredentials = !!(options?.username && options?.password);
 
   // Step 1: Ensure registered OAuth2 client (with stale-client auto-recovery)
@@ -604,8 +674,8 @@ export async function playwrightLogin(
     server = createServer((req, res) => {
       void (async () => {
         try {
-          const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
-          if (url.pathname !== "/callback") {
+          const url = new URL(req.url ?? "/", `http://127.0.0.1:${listenPort}`);
+          if (url.pathname !== callbackPathname) {
             res.writeHead(404);
             res.end();
             return;
@@ -688,7 +758,7 @@ export async function playwrightLogin(
       })();
     });
 
-    server.listen(port, "127.0.0.1", async () => {
+    server.listen(listenPort, "127.0.0.1", async () => {
       try {
         browser = await chromium.launch({ headless: hasCredentials });
         const context = await browser.newContext({ ignoreHTTPSErrors: !!options?.tlsInsecure });

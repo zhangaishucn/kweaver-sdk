@@ -55,6 +55,10 @@ Login options:
   --refresh-token <t>    Use on a machine without a browser: exchange refresh token for access token.
                          Requires --client-id and --client-secret.
                          Get these from the callback page after browser login or \`auth export\`.
+  --port <n>             Local callback port (default: 9010). Use when 9010 is occupied.
+  --redirect-uri <uri>   Full OAuth2 redirect URI override. Localhost URIs start a local server;
+                         non-localhost URIs use a manual paste-the-callback-URL flow.
+                         Overrides --port. Example: http://127.0.0.1:8080/callback
   -u, --username         Username (with -p triggers Playwright headless login)
   -p, --password         Password
   --playwright           Force Playwright browser login even without -u/-p
@@ -105,7 +109,15 @@ Login options:
       const clientId = readOption(args, "--client-id");
       const clientSecret = readOption(args, "--client-secret");
       const refreshToken = readOption(args, "--refresh-token");
+      const customRedirectUri = readOption(args, "--redirect-uri");
+      const customPortStr = readOption(args, "--port");
+      const customPort = customPortStr ? parseInt(customPortStr, 10) : undefined;
       const tlsInsecure = args.includes("--insecure") || args.includes("-k");
+
+      if (customPort !== undefined && (Number.isNaN(customPort) || customPort < 1 || customPort > 65535)) {
+        console.error("Invalid --port value. Expected a number between 1 and 65535.");
+        return 1;
+      }
 
       let token;
 
@@ -120,15 +132,18 @@ Login options:
           clientId, clientSecret, refreshToken, tlsInsecure,
         });
       } else if (username && password) {
-        // Headless Playwright login with credentials
         console.log("Logging in (headless)...");
-        token = await playwrightLogin(normalizedTarget, { username, password, tlsInsecure });
+        token = await playwrightLogin(normalizedTarget, {
+          username, password, tlsInsecure,
+          port: customPort, redirectUri: customRedirectUri ?? undefined,
+        });
       } else if (usePlaywright) {
-        // Explicit Playwright fallback
         console.log("Opening browser for login (Playwright)...");
-        token = await playwrightLogin(normalizedTarget, { tlsInsecure });
+        token = await playwrightLogin(normalizedTarget, {
+          tlsInsecure,
+          port: customPort, redirectUri: customRedirectUri ?? undefined,
+        });
       } else {
-        // Default: OAuth2 authorization code flow (supports refresh_token)
         if (clientId) {
           console.log(`Opening browser for OAuth2 login (client: ${clientId})...`);
         } else {
@@ -138,6 +153,7 @@ Login options:
           clientId: clientId ?? undefined,
           clientSecret: clientSecret ?? undefined,
           tlsInsecure,
+          port: customPort, redirectUri: customRedirectUri ?? undefined,
         });
       }
 

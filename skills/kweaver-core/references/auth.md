@@ -13,7 +13,8 @@ npm install playwright && npx playwright install chromium
 ## 命令
 
 ```bash
-kweaver auth login <url> [--alias <name>] [-u user] [-p pass] [--playwright] [--insecure|-k]
+kweaver auth login <url> [--alias <name>] [-u user] [-p pass] [--playwright]
+                         [--port <n>] [--redirect-uri <uri>] [--insecure|-k]
 kweaver auth <url> [--alias <name>] ...              # 同上（简写）
 kweaver auth whoami [url|alias] [--json]              # 显示当前用户身份
 kweaver auth export [url|alias] [--json]              # 导出凭据（用于无浏览器的服务器）
@@ -68,6 +69,29 @@ kweaver --user bob bkn list
 
 # 登出特定用户
 kweaver auth logout prod --user bob
+```
+
+## 回调地址
+
+默认回调地址为 `http://127.0.0.1:9010/callback`。
+
+| 选项 | 说明 |
+|------|------|
+| `--port <n>` | 修改本地回调端口（默认 9010）。端口被占用时使用。 |
+| `--redirect-uri <uri>` | 完整回调地址覆盖。覆盖 `--port`。 |
+
+- **Localhost URI**（如 `http://127.0.0.1:8080/callback`）：自动启动本地 HTTP 服务器接收回调。
+- **非 Localhost URI**（如 `https://my-proxy.example.com/callback`）：进入手动模式 — 打印授权 URL，等待用户粘贴完整的回调 URL 以提取授权码。适用于远程服务器或代理场景。
+
+```bash
+# 端口被占用
+kweaver auth login https://platform.example.com --port 8080
+
+# 自定义完整回调地址（本地）
+kweaver auth login https://platform.example.com --redirect-uri http://127.0.0.1:3000/oauth/callback
+
+# 非 localhost（手动粘贴模式）
+kweaver auth login https://platform.example.com --redirect-uri https://my-proxy.example.com/callback --client-id <id>
 ```
 
 ## 说明
