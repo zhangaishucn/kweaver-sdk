@@ -174,6 +174,33 @@ export function parseKnObjectTypeQueryArgs(args: string[]): KnObjectTypeQueryOpt
   }
 
   const body = parseJsonObject(bodyText, "object-type query body must be a JSON object.");
+
+  // Detect likely misplaced filter fields in query body (#49)
+  // Instead of a brittle whitelist, detect the pattern: no "condition" key present,
+  // but there are keys with primitive values (string/number/boolean) — these are
+  // almost certainly field=value filters that belong inside a condition structure.
+  if (!("condition" in body)) {
+    const suspectKeys = Object.keys(body).filter((k) => {
+      const v = body[k];
+      return typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+    });
+    // Exclude keys that are well-known query parameters with primitive values
+    const PRIMITIVE_QUERY_KEYS = new Set(["limit"]);
+    const misplacedKeys = suspectKeys.filter((k) => !PRIMITIVE_QUERY_KEYS.has(k));
+    if (misplacedKeys.length > 0) {
+      const keyList = misplacedKeys.map((k) => `"${k}"`).join(", ");
+      const hint =
+        misplacedKeys.length === 1
+          ? `Example: {"limit":20,"condition":{"field":${JSON.stringify(misplacedKeys[0])},"operation":"==","value":"<your-value>"}}`
+          : `Example: {"limit":20,"condition":{"operation":"and","sub_conditions":[${misplacedKeys.map((k) => `{"field":${JSON.stringify(k)},"operation":"==","value":"<value>"}`).join(",")}]}}`;
+      throw new Error(
+        `Likely misplaced filter field(s) ${keyList} in query body.\n` +
+          `Filter conditions must be wrapped in a "condition" structure.\n` +
+          hint
+      );
+    }
+  }
+
   if (limit !== undefined) {
     body.limit = limit;
   }
