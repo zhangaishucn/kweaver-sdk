@@ -1,5 +1,5 @@
 import { applyTlsEnvFromSavedTokens } from "./config/tls-env.js";
-import { NO_AUTH_TOKEN } from "./config/no-auth.js";
+import { NO_AUTH_TOKEN, isNoAuth } from "./config/no-auth.js";
 import {
   getCurrentPlatform,
   loadTokenConfig,
@@ -253,20 +253,22 @@ export class KWeaverClient implements ClientContext {
       ...opts,
     });
 
-    // Quick probe — if the token was revoked server-side, force refresh
-    try {
-      const bd = client.base().businessDomain;
-      const probe = await fetch(
-        `${token.baseUrl.replace(/\/+$/, "")}/api/ontology-manager/v1/knowledge-networks?limit=1`,
-        { headers: buildHeaders(token.accessToken, bd) },
-      );
-      if (probe.status === 401) {
-        throw new Error(
-          "Access token revoked. Run `kweaver auth login` to re-authenticate."
+    if (!isNoAuth(token.accessToken)) {
+      // Quick probe — if the token was revoked server-side, force refresh
+      try {
+        const bd = client.base().businessDomain;
+        const probe = await fetch(
+          `${token.baseUrl.replace(/\/+$/, "")}/api/ontology-manager/v1/knowledge-networks?limit=1`,
+          { headers: buildHeaders(token.accessToken, bd) },
         );
+        if (probe.status === 401) {
+          throw new Error(
+            "Access token revoked. Run `kweaver auth login` to re-authenticate."
+          );
+        }
+      } catch {
+        // Network error — return client as-is, let the caller deal with it
       }
-    } catch {
-      // Network error — return client as-is, let the caller deal with it
     }
     return client;
   }

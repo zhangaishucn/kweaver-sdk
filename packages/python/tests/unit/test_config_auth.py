@@ -42,6 +42,16 @@ def test_config_auth_reads_stored_token(tmp_path: Path, monkeypatch):
     assert headers["Authorization"] == "Bearer my_access_token_123"
 
 
+def test_save_no_auth_platform_tls_insecure(tmp_path: Path):
+    url = "https://tls-noauth.dev"
+    store = PlatformStore(root=tmp_path)
+    data = store.save_no_auth_platform(url, tls_insecure=True)
+    assert data.get("tlsInsecure") is True
+    tok = store.load_token(url)
+    assert tok is not None
+    assert tok.get("tlsInsecure") is True
+
+
 def test_config_auth_no_auth_returns_empty_headers(tmp_path: Path):
     """Stored __NO_AUTH__ token must not send Authorization (matches TS CLI)."""
     url = "https://local.dev"

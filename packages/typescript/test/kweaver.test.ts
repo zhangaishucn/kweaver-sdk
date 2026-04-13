@@ -87,6 +87,18 @@ test("configure reads accessToken from env", () => {
   }
 });
 
+test("configure rejects auth false with accessToken", () => {
+  assert.throws(
+    () =>
+      kweaver.configure({
+        baseUrl: BASE,
+        accessToken: TOKEN,
+        auth: false,
+      }),
+    /auth: false with accessToken/,
+  );
+});
+
 test("getClient throws before configure", () => {
   // Force unconfigured state by importing fresh module state
   // We achieve this by calling a private-state-resetting trick: configure sets state.

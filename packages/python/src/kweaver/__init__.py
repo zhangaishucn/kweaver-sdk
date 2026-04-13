@@ -79,7 +79,8 @@ def configure(
 ) -> None:
     """Initialize the default KWeaver client.
 
-    Auth priority: config > auth=False (NoAuth) > token > username+password.
+    Auth priority: config > auth=False (NoAuth) > token > username+password >
+    KWEAVER_NO_AUTH env (when KWEAVER_TOKEN is unset).
 
     Args:
         url: KWeaver base URL, e.g. "https://kweaver.example.com".
@@ -89,6 +90,8 @@ def configure(
         password: Password for PasswordAuth (requires username).
         auth: If False, use NoAuth (no Authorization headers). Requires ``url`` or
             ``KWEAVER_BASE_URL``. Incompatible with ``token``, ``username``/``password``, and ``config``.
+            Alternatively set env ``KWEAVER_NO_AUTH=1`` (or ``true``/``yes``) with ``url`` or
+            ``KWEAVER_BASE_URL`` when ``KWEAVER_TOKEN`` is not set (matches TS CLI behavior).
         config: If True, use credentials from the local config file (~/.kweaver/).
             When config=True, url is ignored — the base URL comes from the saved
             platform config, preventing accidental cross-environment credential leaks.
@@ -146,8 +149,21 @@ def configure(
                 raise ValueError("Provide url=, config=True, or set KWEAVER_BASE_URL")
             auth = PasswordAuth(base_url=effective_url, username=username, password=password)
             _default_client = KWeaverClient(base_url=effective_url, auth=auth, business_domain=effective_domain)
+        elif os.environ.get("KWEAVER_NO_AUTH", "").lower() in ("1", "true", "yes") and not os.environ.get(
+            "KWEAVER_TOKEN", ""
+        ).strip():
+            effective_url = url or os.environ.get("KWEAVER_BASE_URL")
+            if not effective_url:
+                raise ValueError(
+                    "Provide url= or set KWEAVER_BASE_URL when KWEAVER_NO_AUTH is set"
+                )
+            _default_client = KWeaverClient(
+                base_url=effective_url, auth=NoAuth(), business_domain=effective_domain
+            )
         else:
-            raise ValueError("Provide token=, username+password=, or config=True")
+            raise ValueError(
+                "Provide token=, username+password=, config=True, or KWEAVER_NO_AUTH with url/KWEAVER_BASE_URL"
+            )
         _default_bkn_id = bkn_id
         _default_agent_id = agent_id
 

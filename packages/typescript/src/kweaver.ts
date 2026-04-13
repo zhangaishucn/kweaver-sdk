@@ -85,6 +85,9 @@ export function configure(opts: ConfigureOptions): void {
   if (auth === false && config) {
     throw new Error("Cannot use auth: false with config: true.");
   }
+  if (auth === false && accessToken) {
+    throw new Error("Cannot use auth: false with accessToken.");
+  }
 
   if (auth === false) {
     const resolvedBase = baseUrl ?? process.env.KWEAVER_BASE_URL;
