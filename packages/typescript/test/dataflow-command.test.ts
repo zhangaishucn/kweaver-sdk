@@ -220,9 +220,10 @@ test("dataflow runs with valid --since requests one natural-day range and merges
   const configDir = createConfigDir();
   await setupToken(configDir);
   const seenUrls: string[] = [];
-  const day = new Date("2026-04-01");
-  const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0);
-  const end = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59);
+  // 使用本地时间解析，避免 UTC 偏移问题
+  const year = 2026, month = 3, day = 1; // month is 0-indexed: April = 3
+  const start = new Date(year, month, day, 0, 0, 0);
+  const end = new Date(year, month, day, 23, 59, 59);
   const startTime = Math.floor(start.getTime() / 1000);
   const endTime = Math.floor(end.getTime() / 1000);
 
@@ -276,9 +277,10 @@ test("dataflow runs with valid --since requests one natural-day range and merges
       seenUrls[0],
       `https://mock.kweaver.test/api/automation/v2/dag/dag-001/results?page=0&limit=20&sortBy=started_at&order=desc&start_time=${startTime}&end_time=${endTime}`,
     );
+    // 修复后：第二页使用 limit=20，而不是 limit=total-20
     assert.equal(
       seenUrls[1],
-      `https://mock.kweaver.test/api/automation/v2/dag/dag-001/results?page=1&limit=5&sortBy=started_at&order=desc&start_time=${startTime}&end_time=${endTime}`,
+      `https://mock.kweaver.test/api/automation/v2/dag/dag-001/results?page=1&limit=20&sortBy=started_at&order=desc&start_time=${startTime}&end_time=${endTime}`,
     );
     assert.match(result.stdout, /run-001/);
     assert.match(result.stdout, /run-025/);

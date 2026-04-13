@@ -52,10 +52,16 @@ function buildRunTableRows(items: DataflowRunItem[]): Array<Record<string, strin
 }
 
 function parseSinceToLocalDayRange(value: string): { startTime: number; endTime: number } | null {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  const start = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0);
-  const end = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 23, 59, 59);
+  // 只支持 YYYY-MM-DD 格式，解析为本地时区的一整天范围
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10) - 1; // Date month is 0-indexed
+  const day = parseInt(match[3], 10);
+
+  const start = new Date(year, month, day, 0, 0, 0);
+  const end = new Date(year, month, day, 23, 59, 59);
   return {
     startTime: Math.floor(start.getTime() / 1000),
     endTime: Math.floor(end.getTime() / 1000),
@@ -224,18 +230,18 @@ export async function runDataflowCommand(args: string[]): Promise<number> {
             });
             results = [...first.results];
             const total = first.total ?? first.results.length;
-            if (total > 20) {
-              const second = await listDataflowRuns({
+            for (let page = 1; page * 20 < total; page += 1) {
+              const next = await listDataflowRuns({
                 ...base,
                 dagId: argv.dagId,
-                page: 1,
-                limit: total - 20,
+                page,
+                limit: 20,
                 sortBy: "started_at",
                 order: "desc",
                 startTime: dayRange.startTime,
                 endTime: dayRange.endTime,
               });
-              results = results.concat(second.results);
+              results = results.concat(next.results);
             }
           }
 
