@@ -323,7 +323,7 @@ export async function oauth2Login(
   baseUrl: string,
   options?: {
     port?: number;
-    /** Full redirect URI override (e.g. "http://127.0.0.1:8080/callback" or a remote URL). */
+    /** Full redirect URI override (e.g. "http://127.0.0.1:9010/callback" or a remote URL). */
     redirectUri?: string;
     scope?: string;
     clientId?: string;

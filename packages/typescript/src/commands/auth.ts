@@ -58,7 +58,7 @@ Login options:
   --port <n>             Local callback port (default: 9010). Use when 9010 is occupied.
   --redirect-uri <uri>   Full OAuth2 redirect URI override. Localhost URIs start a local server;
                          non-localhost URIs use a manual paste-the-callback-URL flow.
-                         Overrides --port. Example: http://127.0.0.1:8080/callback
+                         When set, --port is ignored. Example: --redirect-uri http://127.0.0.1:9010/callback
   -u, --username         Username (with -p triggers Playwright headless login)
   -p, --password         Password
   --playwright           Force Playwright browser login even without -u/-p
@@ -113,6 +113,25 @@ Login options:
       const customPortStr = readOption(args, "--port");
       const customPort = customPortStr ? parseInt(customPortStr, 10) : undefined;
       const tlsInsecure = args.includes("--insecure") || args.includes("-k");
+
+      const KNOWN_LOGIN_FLAGS = new Set([
+        "--alias", "--client-id", "--client-secret", "--refresh-token",
+        "--port", "--redirect-uri", "--username", "-u", "--password", "-p",
+        "--playwright", "--insecure", "-k",
+      ]);
+      const KNOWN_VALUE_FLAGS = new Set([
+        "--alias", "--client-id", "--client-secret", "--refresh-token",
+        "--port", "--redirect-uri", "--username", "-u", "--password", "-p",
+      ]);
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a.startsWith("-") && a !== target && !KNOWN_LOGIN_FLAGS.has(a)) {
+          console.error(`Unknown option: ${a}`);
+          console.error("Run 'kweaver auth --help' to see available options.");
+          return 1;
+        }
+        if (KNOWN_VALUE_FLAGS.has(a)) i++;
+      }
 
       if (customPort !== undefined && (Number.isNaN(customPort) || customPort < 1 || customPort > 65535)) {
         console.error("Invalid --port value. Expected a number between 1 and 65535.");

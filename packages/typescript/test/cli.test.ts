@@ -467,6 +467,51 @@ test("run auth login with --refresh-token exchanges and saves access token", asy
   assert.equal(client?.clientSecret, "h-sec");
 });
 
+test("run auth login rejects unknown flags", async () => {
+  const configDir = createConfigDir();
+  await importStoreModule(configDir);
+  const auth = await importAuthModule(configDir);
+
+  const errors: string[] = [];
+  const origError = console.error;
+  console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
+  try {
+    const code = await auth.runAuthCommand([
+      "https://example.com",
+      "--redict-uri",
+      "http://127.0.0.1:9010/callback",
+    ]);
+    assert.equal(code, 1);
+    assert.ok(errors.some((e) => e.includes("Unknown option: --redict-uri")));
+  } finally {
+    console.error = origError;
+  }
+});
+
+test("run auth login accepts all known flags without unknown-flag error", async () => {
+  const configDir = createConfigDir();
+  await importStoreModule(configDir);
+  const auth = await importAuthModule(configDir);
+
+  const errors: string[] = [];
+  const origError = console.error;
+  console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
+  try {
+    const code = await auth.runAuthCommand([
+      "https://headless.example.com",
+      "--refresh-token", "rt",
+      "--client-id", "cid",
+      "--client-secret", "csec",
+      "--redirect-uri", "http://127.0.0.1:9010/callback",
+      "--port", "9010",
+      "--insecure",
+    ]);
+    assert.ok(!errors.some((e) => e.includes("Unknown option")));
+  } finally {
+    console.error = origError;
+  }
+});
+
 test("formatHttpError expands network request failures with url and cause", () => {
   const message = formatHttpError(
     new NetworkRequestError(
