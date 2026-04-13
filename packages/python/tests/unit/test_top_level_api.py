@@ -58,6 +58,19 @@ class TestConfigure:
         with pytest.raises(ValueError, match="Provide token="):
             kweaver.configure("https://example.com")
 
+    def test_configure_auth_false(self):
+        kweaver.configure("https://example.com", auth=False)
+        assert kweaver._default_client is not None
+
+    def test_configure_auth_false_requires_url(self, monkeypatch):
+        monkeypatch.delenv("KWEAVER_BASE_URL", raising=False)
+        with pytest.raises(ValueError, match="KWEAVER_BASE_URL"):
+            kweaver.configure(auth=False)
+
+    def test_configure_auth_false_with_config_raises(self):
+        with pytest.raises(ValueError, match="config=True with auth=False"):
+            kweaver.configure(config=True, auth=False)
+
     def test_failed_reconfigure_clears_previous_client(self):
         """A failed configure() must not leave the old client active."""
         kweaver.configure("https://example.com", token="tok1", bkn_id="kn-old")

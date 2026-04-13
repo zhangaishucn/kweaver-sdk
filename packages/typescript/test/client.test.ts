@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { NO_AUTH_TOKEN } from "../src/config/no-auth.js";
 import { KWeaverClient } from "../src/client.js";
 import { ContextLoaderResource } from "../src/resources/context-loader.js";
 
@@ -13,6 +14,30 @@ function makeClient(extra: Record<string, string> = {}): KWeaverClient {
 }
 
 // ── constructor ───────────────────────────────────────────────────────────────
+
+test("KWeaverClient auth false uses no-auth sentinel", () => {
+  const client = new KWeaverClient({ baseUrl: BASE, auth: false });
+  assert.equal(client.base().accessToken, NO_AUTH_TOKEN);
+  assert.equal(client.base().baseUrl, BASE);
+});
+
+test("KWeaverClient auth false requires baseUrl when no env and no platform", () => {
+  const origUrl = process.env.KWEAVER_BASE_URL;
+  const origDir = process.env.KWEAVERC_CONFIG_DIR;
+  delete process.env.KWEAVER_BASE_URL;
+  process.env.KWEAVERC_CONFIG_DIR = fileURLToPath(new URL("../../.tmp-test-cfg", import.meta.url));
+  try {
+    assert.throws(
+      () => new KWeaverClient({ auth: false }),
+      /baseUrl is required when auth is false/,
+    );
+  } finally {
+    if (origUrl !== undefined) process.env.KWEAVER_BASE_URL = origUrl;
+    else delete process.env.KWEAVER_BASE_URL;
+    if (origDir !== undefined) process.env.KWEAVERC_CONFIG_DIR = origDir;
+    else delete process.env.KWEAVERC_CONFIG_DIR;
+  }
+});
 
 test("KWeaverClient throws when accessToken missing and env var absent", () => {
   // Point config dir to an empty temp directory so no saved token is found

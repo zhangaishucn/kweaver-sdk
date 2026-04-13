@@ -254,6 +254,24 @@ test("ensureValidToken: forceRefresh calls token endpoint", async () => {
   }
 });
 
+test("ensureValidToken: no-auth token returns without calling fetch", async () => {
+  const configDir = createConfigDir();
+  const { store, oauth } = await importOauthAndStore(configDir);
+  const baseUrl = "https://plain.example.com";
+  store.saveNoAuthPlatform(baseUrl);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("fetch should not be called for no-auth ensureValidToken");
+  };
+  try {
+    const t = await oauth.ensureValidToken();
+    assert.ok(store.isNoAuth(t.accessToken));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 // ---------------------------------------------------------------------------
 // KWEAVER_USER env var: load a specific user's token
 // ---------------------------------------------------------------------------
@@ -365,6 +383,29 @@ test("withTokenRetry: returns on first success", async () => {
   });
   assert.equal(r, 42);
   assert.equal(n, 1);
+});
+
+test("withTokenRetry: no-auth session does not attempt refresh on 401", async () => {
+  const configDir = createConfigDir();
+  const { store, oauth } = await importOauthAndStore(configDir);
+  const baseUrl = "https://plain.example.com";
+  store.saveNoAuthPlatform(baseUrl);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("fetch should not be called");
+  };
+  try {
+    await assert.rejects(
+      () =>
+        oauth.withTokenRetry(async () => {
+          throw new HttpError(401, "Unauthorized", "{}");
+        }),
+      HttpError,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("withTokenRetry: retries once after 401 when refresh succeeds", async () => {

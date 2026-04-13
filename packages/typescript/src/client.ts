@@ -1,8 +1,10 @@
 import { applyTlsEnvFromSavedTokens } from "./config/tls-env.js";
+import { NO_AUTH_TOKEN } from "./config/no-auth.js";
 import {
   getCurrentPlatform,
   loadTokenConfig,
 } from "./config/store.js";
+import { buildHeaders } from "./api/headers.js";
 import { ensureValidToken } from "./auth/oauth.js";
 import { AgentsResource } from "./resources/agents.js";
 import { ConversationsResource } from "./resources/conversations.js";
@@ -53,6 +55,12 @@ export interface KWeaverClientOptions {
    * Useful when env vars hold stale tokens or are intended for other tooling.
    */
   config?: boolean;
+
+  /**
+   * When false, use no-auth mode: API requests omit Authorization / token headers.
+   * Requires `baseUrl` (explicit, env, or active platform when `config` is true).
+   */
+  auth?: boolean;
 }
 
 // ── KWeaverClient ─────────────────────────────────────────────────────────────
@@ -122,6 +130,42 @@ export class KWeaverClient implements ClientContext {
 
     let baseUrl: string | undefined;
     let accessToken: string | undefined;
+
+    if (opts.auth === false) {
+      if (opts.config) {
+        const platform = getCurrentPlatform();
+        if (!platform) {
+          throw new Error("No active platform. Run `kweaver auth login` first.");
+        }
+        baseUrl = opts.baseUrl ?? platform;
+      } else {
+        const envUrl = process.env.KWEAVER_BASE_URL;
+        baseUrl = opts.baseUrl ?? envUrl;
+        if (!baseUrl) {
+          const platform = getCurrentPlatform();
+          if (platform) baseUrl = platform;
+        }
+      }
+      if (!baseUrl) {
+        throw new Error(
+          "KWeaverClient: baseUrl is required when auth is false. " +
+            "Pass it explicitly, set KWEAVER_BASE_URL, or run `kweaver auth login`.",
+        );
+      }
+      this._baseUrl = baseUrl.replace(/\/+$/, "");
+      this._accessToken = NO_AUTH_TOKEN;
+      this._businessDomain = opts.businessDomain ?? envDomain ?? "bd_public";
+      this.knowledgeNetworks = new KnowledgeNetworksResource(this);
+      this.agents = new AgentsResource(this);
+      this.bkn = new BknResource(this);
+      this.conversations = new ConversationsResource(this);
+      this.dataflows = new DataflowsResource(this);
+      this.datasources = new DataSourcesResource(this);
+      this.dataviews = new DataViewsResource(this);
+      this.vega = new VegaResource(this);
+      this.skills = new SkillsResource(this);
+      return;
+    }
 
     if (opts.config) {
       // config: true — read exclusively from ~/.kweaver/, ignore env vars
@@ -207,9 +251,10 @@ export class KWeaverClient implements ClientContext {
 
     // Quick probe — if the token was revoked server-side, force refresh
     try {
+      const bd = client.base().businessDomain;
       const probe = await fetch(
         `${token.baseUrl.replace(/\/+$/, "")}/api/ontology-manager/v1/knowledge-networks?limit=1`,
-        { headers: { authorization: `Bearer ${token.accessToken}`, token: token.accessToken } },
+        { headers: buildHeaders(token.accessToken, bd) },
       );
       if (probe.status === 401) {
         throw new Error(
