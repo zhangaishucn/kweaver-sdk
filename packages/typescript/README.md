@@ -150,6 +150,7 @@ kweaver config show / list-bd / set-bd <value>   # platform business domain — 
 kweaver token
 kweaver ds list/get/delete/tables/connect
 kweaver ds import-csv <ds_id> --files <glob> [--table-prefix <p>] [--batch-size 500] [--recreate]
+kweaver dataflow list/run/runs/logs
 kweaver dataview list/find/get/query/delete
 kweaver bkn list/get/stats/export/create/update/delete
 kweaver bkn create-from-ds <ds_id> --name <name> [--tables t1,t2] [--build]
@@ -168,6 +169,20 @@ kweaver context-loader config set/use/list/show
 kweaver context-loader kn-search/query-object-instance/...
 kweaver call <path> [-X METHOD] [-d BODY] [-H header]
 ```
+
+### Dataflow CLI examples
+
+```bash
+kweaver dataflow list
+kweaver dataflow run <dagId> --file ./demo.pdf
+kweaver dataflow run <dagId> --url https://example.com/demo.pdf --name demo.pdf
+kweaver dataflow runs <dagId>
+kweaver dataflow runs <dagId> --since 2026-04-01
+kweaver dataflow logs <dagId> <instanceId>
+kweaver dataflow logs <dagId> <instanceId> --detail
+```
+
+`kweaver dataflow runs --since` filters one local natural day. If the value cannot be parsed by `new Date(...)`, the CLI falls back to the most recent 20 runs. `kweaver dataflow logs` defaults to summary output; add `--detail` to print indented `input` and `output` payloads.
 
 ## Environment Variables
 

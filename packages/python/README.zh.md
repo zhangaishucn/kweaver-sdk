@@ -104,6 +104,8 @@ client = KWeaverClient(auth=ConfigAuth(), dry_run=True)
 | 查询 | `client.query` | `semantic_search`, `instances`, `instances_iter`, `kn_search`, `subgraph` |
 | Agent | `client.agents` | `list`, `get`, `get_by_key`, `create`, `update`, `delete`, `publish`, `unpublish` |
 | 对话 | `client.conversations` | `send_message`, `list_messages` |
+| Dataflow（旧生命周期接口） | `client.dataflows` | `create`, `run`, `poll`, `delete`, `execute` |
+| Dataflow v2 | `client.dataflow_v2` | `list_dataflows`, `run_dataflow_with_file`, `run_dataflow_with_remote_url`, `list_dataflow_runs`, `get_dataflow_logs_page` |
 | 数据视图（mdl-data-model） | `client.dataviews` | `create`, `list`, `get`, `delete`, `find_by_table`, `query`（mdl-uniquery SQL） |
 | Skill | `client.skills` | `list`, `market`, `get`, `register_content`, `register_zip`, `update_status`, `content`, `read_file`, `download`, `install` |
 
@@ -145,6 +147,45 @@ KWeaverClient(
 | `KWEAVER_DEBUG` | 启用 debug 模式（`true`） |
 | `KWEAVER_FORMAT` | CLI 输出格式（`md`/`json`/`yaml`） |
 | `KWEAVER_TLS_INSECURE` | 设为 `1` 或 `true` 时跳过 TLS 校验（仅开发；`kweaver auth … --insecure` 会按平台写入 `token.json`） |
+
+---
+
+## Dataflow v2 示例
+
+```python
+from kweaver import KWeaverClient, ConfigAuth
+
+client = KWeaverClient(auth=ConfigAuth())
+
+flows = client.dataflow_v2.list_dataflows()
+
+file_run = client.dataflow_v2.run_dataflow_with_file(
+    "dag-id",
+    file_path="./demo.pdf",
+)
+
+remote_run = client.dataflow_v2.run_dataflow_with_remote_url(
+    "dag-id",
+    url="https://example.com/demo.pdf",
+    name="demo.pdf",
+)
+
+runs = client.dataflow_v2.list_dataflow_runs(
+    "dag-id",
+    limit=20,
+    sort_by="started_at",
+    order="desc",
+)
+
+logs = client.dataflow_v2.get_dataflow_logs_page(
+    "dag-id",
+    remote_run["dag_instance_id"],
+    page=0,
+    limit=10,
+)
+```
+
+Python 包当前仍然是 SDK-only；`dataflow` CLI 命令由 TypeScript 包提供。
 
 ---
 

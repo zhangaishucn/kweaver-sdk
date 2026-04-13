@@ -105,6 +105,7 @@ client = KWeaverClient(auth=ConfigAuth(), dry_run=True)
 | Agents | `client.agents` | `list`, `get`, `get_by_key`, `create`, `update`, `delete`, `publish`, `unpublish` |
 | Conversations | `client.conversations` | `send_message`, `list_messages` |
 | Dataflows | `client.dataflows` | `create`, `run`, `poll`, `delete`, `execute` |
+| Dataflow v2 | `client.dataflow_v2` | `list_dataflows`, `run_dataflow_with_file`, `run_dataflow_with_remote_url`, `list_dataflow_runs`, `get_dataflow_logs_page` |
 | Data Views | `client.dataviews` | `create`, `list`, `get`, `delete`, `find_by_table`, `query` (SQL via mdl-uniquery) |
 | Skills | `client.skills` | `list`, `market`, `get`, `register_content`, `register_zip`, `update_status`, `content`, `read_file`, `download`, `install` |
 
@@ -146,6 +147,45 @@ KWeaverClient(
 | `KWEAVER_DEBUG` | Enable debug mode (`true`) |
 | `KWEAVER_FORMAT` | Output format (`md`/`json`/`yaml`) |
 | `KWEAVER_TLS_INSECURE` | Set to `1` or `true` to skip TLS verification for HTTPS (dev only; `kweaver auth … --insecure` persists per platform in `token.json`) |
+
+---
+
+## Dataflow v2 Example
+
+```python
+from kweaver import KWeaverClient, ConfigAuth
+
+client = KWeaverClient(auth=ConfigAuth())
+
+flows = client.dataflow_v2.list_dataflows()
+
+file_run = client.dataflow_v2.run_dataflow_with_file(
+    "dag-id",
+    file_path="./demo.pdf",
+)
+
+remote_run = client.dataflow_v2.run_dataflow_with_remote_url(
+    "dag-id",
+    url="https://example.com/demo.pdf",
+    name="demo.pdf",
+)
+
+runs = client.dataflow_v2.list_dataflow_runs(
+    "dag-id",
+    limit=20,
+    sort_by="started_at",
+    order="desc",
+)
+
+logs = client.dataflow_v2.get_dataflow_logs_page(
+    "dag-id",
+    remote_run["dag_instance_id"],
+    page=0,
+    limit=10,
+)
+```
+
+The Python package remains SDK-only. The `dataflow` CLI commands are provided by the TypeScript package.
 
 ---
 
