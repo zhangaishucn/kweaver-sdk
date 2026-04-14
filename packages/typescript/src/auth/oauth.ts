@@ -258,66 +258,10 @@ async function resolveOrRegisterClient(
 }
 
 /**
- * Parse a redirect URI to extract host, port, and pathname.
- * Returns null if the URI is not a valid HTTP(S) URL.
- */
-function parseRedirectUri(uri: string): { host: string; port: number; pathname: string; isLocalhost: boolean } | null {
-  try {
-    const parsed = new URL(uri);
-    const host = parsed.hostname;
-    const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
-    const isLocalhost = host === "127.0.0.1" || host === "localhost" || host === "::1";
-    return { host, port, pathname: parsed.pathname, isLocalhost };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Manual code flow for non-localhost redirect URIs.
- * Prints the auth URL, then reads the full callback URL from stdin
- * to extract the authorization code.
- */
-async function waitForManualCode(authUrl: string, state: string): Promise<string> {
-  const { createInterface } = await import("node:readline");
-  process.stderr.write(
-    "\nSince the redirect URI is not localhost, you need to complete login manually.\n" +
-    "1. Open this URL in your browser:\n\n" +
-    `   ${authUrl}\n\n` +
-    "2. After login, the browser will redirect to your callback URL.\n" +
-    "3. Copy the full callback URL and paste it here:\n\n",
-  );
-
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
-  const callbackUrl = await new Promise<string>((resolve) => {
-    rl.question("Callback URL> ", (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-
-  const parsed = new URL(callbackUrl);
-  const receivedState = parsed.searchParams.get("state");
-  if (receivedState !== state) {
-    throw new Error("OAuth2 state mismatch — possible CSRF attack.");
-  }
-  const error = parsed.searchParams.get("error");
-  if (error) {
-    const desc = parsed.searchParams.get("error_description") ?? "";
-    throw new Error(desc ? `Authorization failed: ${error} — ${desc}` : `Authorization failed: ${error}`);
-  }
-  const code = parsed.searchParams.get("code");
-  if (!code) {
-    throw new Error("No authorization code found in the callback URL.");
-  }
-  return code;
-}
-
-/**
  * OAuth2 Authorization Code login flow.
  * 1. Register client (if not already registered), OR use a provided client ID
  * 2. Open browser to /oauth2/auth
- * 3. Receive authorization code via local HTTP callback (or manual paste for non-localhost)
+ * 3. Receive authorization code via local HTTP callback
  * 4. Exchange code for access_token + refresh_token
  * 5. Save token.json + client.json to ~/.kweaver/
  */
@@ -325,8 +269,6 @@ export async function oauth2Login(
   baseUrl: string,
   options?: {
     port?: number;
-    /** Full redirect URI override (e.g. "http://127.0.0.1:9010/callback" or a remote URL). */
-    redirectUri?: string;
     scope?: string;
     clientId?: string;
     clientSecret?: string;
@@ -341,13 +283,7 @@ export async function oauth2Login(
   const base = normalizeBaseUrl(baseUrl);
   const port = options?.port ?? DEFAULT_REDIRECT_PORT;
   const scope = options?.scope ?? DEFAULT_SCOPE;
-
-  // Determine redirect URI: explicit option > port-based default
-  const redirectUri = options?.redirectUri ?? `http://127.0.0.1:${port}/callback`;
-  const parsedRedirect = parseRedirectUri(redirectUri);
-  const isLocalRedirect = parsedRedirect?.isLocalhost ?? true;
-  const listenPort = parsedRedirect?.port ?? port;
-  const callbackPathname = parsedRedirect?.pathname ?? "/callback";
+  const redirectUri = `http://localhost:${port}/callback`;
 
   // Step 1: Determine client — use provided client ID or fall back to dynamic registration
   let client: ClientConfig;
@@ -389,8 +325,8 @@ export async function oauth2Login(
 
   let token: TokenConfig;
 
-  if (isLocalRedirect) {
-    // Step 4a: Local callback — start HTTP server to receive the authorization code
+  {
+    // Step 4: Start local HTTP server to receive the authorization code
     token = await new Promise<TokenConfig>((resolve, reject) => {
       let server: Server;
       const timeoutId = setTimeout(() => {
@@ -401,8 +337,8 @@ export async function oauth2Login(
       server = createServer((req, res) => {
         void (async () => {
           try {
-            const url = new URL(req.url ?? "/", `http://127.0.0.1:${listenPort}`);
-            if (url.pathname !== callbackPathname) {
+            const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+            if (url.pathname !== "/callback") {
               res.writeHead(404);
               res.end();
               return;
@@ -471,20 +407,13 @@ export async function oauth2Login(
         })();
       });
 
-      server.listen(listenPort, "127.0.0.1", () => {
+      server.listen(port, "127.0.0.1", () => {
         import("../utils/browser.js").then(({ openBrowser }) => {
           openBrowser(authUrl);
         });
         process.stderr.write(`If the wrong browser opens, copy this URL to your correct browser:\n  ${authUrl}\n`);
       });
     });
-  } else {
-    // Step 4b: Non-localhost redirect — manual code entry flow
-    const code = await waitForManualCode(authUrl, state);
-    token = await exchangeCodeForToken(
-      base, code, client.clientId, client.clientSecret,
-      redirectUri, pkce?.verifier, options?.tlsInsecure,
-    );
   }
 
   setCurrentPlatform(base);
@@ -624,8 +553,6 @@ export async function playwrightLogin(
     username?: string;
     password?: string;
     port?: number;
-    /** Full redirect URI override. */
-    redirectUri?: string;
     scope?: string;
     tlsInsecure?: boolean;
   },
@@ -648,10 +575,7 @@ export async function playwrightLogin(
   const base = normalizeBaseUrl(baseUrl);
   const port = options?.port ?? DEFAULT_REDIRECT_PORT;
   const scope = options?.scope ?? DEFAULT_SCOPE;
-  const redirectUri = options?.redirectUri ?? `http://127.0.0.1:${port}/callback`;
-  const parsedRedirect = parseRedirectUri(redirectUri);
-  const listenPort = parsedRedirect?.port ?? port;
-  const callbackPathname = parsedRedirect?.pathname ?? "/callback";
+  const redirectUri = `http://localhost:${port}/callback`;
   const hasCredentials = !!(options?.username && options?.password);
 
   // Step 1: Ensure registered OAuth2 client (with stale-client auto-recovery)
@@ -698,8 +622,8 @@ export async function playwrightLogin(
     server = createServer((req, res) => {
       void (async () => {
         try {
-          const url = new URL(req.url ?? "/", `http://127.0.0.1:${listenPort}`);
-          if (url.pathname !== callbackPathname) {
+          const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+          if (url.pathname !== "/callback") {
             res.writeHead(404);
             res.end();
             return;
@@ -782,7 +706,7 @@ export async function playwrightLogin(
       })();
     });
 
-    server.listen(listenPort, "127.0.0.1", async () => {
+    server.listen(port, "127.0.0.1", async () => {
       try {
         browser = await chromium.launch({ headless: hasCredentials });
         const context = await browser.newContext({ ignoreHTTPSErrors: !!options?.tlsInsecure });
@@ -843,7 +767,7 @@ export async function refreshTokenLogin(
   },
 ): Promise<TokenConfig> {
   const base = normalizeBaseUrl(baseUrl);
-  const redirectUri = `http://127.0.0.1:${DEFAULT_REDIRECT_PORT}/callback`;
+  const redirectUri = `http://localhost:${DEFAULT_REDIRECT_PORT}/callback`;
   const client: ClientConfig = {
     baseUrl: base,
     clientId: options.clientId,

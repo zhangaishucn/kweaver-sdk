@@ -586,7 +586,6 @@ test("run auth login accepts all known flags without unknown-flag error", async 
       "--refresh-token", "rt",
       "--client-id", "cid",
       "--client-secret", "csec",
-      "--redirect-uri", "http://127.0.0.1:9010/callback",
       "--port", "9010",
       "--insecure",
       "--no-auth",
