@@ -358,7 +358,38 @@ class OAuth2BrowserAuth:
 
     def _resolve_redirect_uri(self) -> str:
         """Return the redirect URI based on port."""
-        return f"http://localhost:{self._redirect_port}/callback"
+        return f"http://127.0.0.1:{self._redirect_port}/callback"
+
+    @staticmethod
+    def _is_wsl() -> bool:
+        """Detect WSL environment."""
+        try:
+            with open("/proc/version", "r") as f:
+                return "microsoft" in f.read().lower()
+        except OSError:
+            return False
+
+    @staticmethod
+    def _open_browser(url: str) -> bool:
+        """Open URL in browser, with WSL support (cmd.exe fallback)."""
+        import subprocess
+        import webbrowser
+
+        if OAuth2BrowserAuth._is_wsl():
+            try:
+                escaped = url.replace("&", "^&")
+                subprocess.Popen(
+                    ["cmd.exe", "/c", "start", "", escaped],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return True
+            except OSError:
+                pass
+        try:
+            return webbrowser.open(url)
+        except Exception:
+            return False
 
     @staticmethod
     def _prompt_for_code(auth_url: str, state: str, port: int) -> str:
@@ -369,7 +400,7 @@ class OAuth2BrowserAuth:
         paste_instructions = (
             "After login, the browser may show an error page (this is expected if nothing listens on localhost).\n"
             "Copy the FULL URL from the address bar and paste it here, or paste only the authorization code.\n"
-            f"The URL looks like: http://localhost:{port}/callback?code=THIS_PART&state=...\n\n"
+            f"The URL looks like: http://127.0.0.1:{port}/callback?code=THIS_PART&state=...\n\n"
         )
         print(
             "\nNo browser available. Open this URL on any device:\n\n"
@@ -495,7 +526,7 @@ class OAuth2BrowserAuth:
         server = HTTPServer(("127.0.0.1", self._redirect_port), CallbackHandler)
         server.timeout = 120
 
-        opened = webbrowser.open(auth_url)
+        opened = self._open_browser(auth_url)
         if not opened:
             server.server_close()
             run_paste_flow()
@@ -539,7 +570,7 @@ class OAuth2BrowserAuth:
             )
             if resp.status_code in (301, 302, 303, 307, 308):
                 location = resp.headers.get("location", "")
-                if "error=invalid_client" in location or "error=error" in location:
+                if "error=" in location:
                     return False
                 return True
             if resp.status_code >= 400:

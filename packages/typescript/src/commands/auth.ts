@@ -118,14 +118,18 @@ Login options:
       const noAuth = args.includes("--no-auth");
       const noBrowser = args.includes("--no-browser");
 
+      if (args.includes("--redirect-uri")) {
+        console.error("Warning: --redirect-uri is deprecated and ignored. The redirect URI is always http://127.0.0.1:<port>/callback.");
+      }
+
       const KNOWN_LOGIN_FLAGS = new Set([
         "--alias", "--client-id", "--client-secret", "--refresh-token",
         "--port", "--no-browser", "--username", "-u", "--password", "-p",
-        "--playwright", "--insecure", "-k", "--no-auth",
+        "--playwright", "--insecure", "-k", "--no-auth", "--redirect-uri",
       ]);
       const KNOWN_VALUE_FLAGS = new Set([
         "--alias", "--client-id", "--client-secret", "--refresh-token",
-        "--port", "--username", "-u", "--password", "-p",
+        "--port", "--username", "-u", "--password", "-p", "--redirect-uri",
       ]);
       for (let i = 0; i < args.length; i++) {
         const a = args[i];
@@ -145,6 +149,9 @@ Login options:
       if (noAuth && refreshToken) {
         console.error("--no-auth cannot be used with --refresh-token.");
         return 1;
+      }
+      if (noAuth && noBrowser) {
+        console.error("--no-auth does not require a browser; --no-browser is ignored.");
       }
       if (noAuth && (username || password || usePlaywright)) {
         console.error("--no-auth cannot be used with Playwright login or -u/-p.");

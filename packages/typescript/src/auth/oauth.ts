@@ -196,10 +196,7 @@ async function isClientStillValid(
     });
     if (resp.status === 302) {
       const location = resp.headers.get("location") ?? "";
-      if (
-        location.includes("error=invalid_client") ||
-        location.includes("error=error")
-      ) {
+      if (location.includes("error=")) {
         return false;
       }
       return true;
@@ -242,14 +239,25 @@ async function resolveOrRegisterClient(
 
   let client = loadClientConfig(baseUrl);
   if (client?.clientId) {
-    const valid = await isClientStillValid(baseUrl, client.clientId, redirectUri);
-    if (valid) return client;
-
-    process.stderr.write(
-      "Cached OAuth2 client is no longer valid on the server. Re-registering…\n",
-    );
-    deleteClientConfig(baseUrl);
-    client = null;
+    const storedUri = client.redirectUri ?? redirectUri;
+    const valid = await isClientStillValid(baseUrl, client.clientId, storedUri);
+    if (valid) {
+      if (storedUri !== redirectUri) {
+        process.stderr.write(
+          "Redirect URI changed. Re-registering OAuth2 client…\n",
+        );
+        deleteClientConfig(baseUrl);
+        client = null;
+      } else {
+        return client;
+      }
+    } else {
+      process.stderr.write(
+        "Cached OAuth2 client is no longer valid on the server. Re-registering…\n",
+      );
+      deleteClientConfig(baseUrl);
+      client = null;
+    }
   }
 
   const registered = await registerOAuth2Client(baseUrl, redirectUri, scope);
@@ -290,7 +298,7 @@ async function promptForCode(
   const pasteInstructions =
     "After login, the browser may show an error page (this is expected if nothing listens on localhost).\n" +
     "Copy the FULL URL from the address bar and paste it here, or paste only the authorization code.\n" +
-    `The URL looks like: http://localhost:${port}/callback?code=THIS_PART&state=...\n\n`;
+    `The URL looks like: http://127.0.0.1:${port}/callback?code=THIS_PART&state=...\n\n`;
   process.stderr.write(
     "\n" +
       intro +
@@ -298,7 +306,8 @@ async function promptForCode(
       stderrEmphasis(pasteInstructions),
   );
   const rl = createInterface({ input: process.stdin, output: process.stderr });
-  const input = await new Promise<string>((resolve) => {
+  const input = await new Promise<string>((resolve, reject) => {
+    rl.on("close", () => reject(new Error("Login cancelled.")));
     rl.question("Paste URL or code> ", (answer) => {
       rl.close();
       resolve(answer.trim());
@@ -365,7 +374,7 @@ export async function oauth2Login(
   const base = normalizeBaseUrl(baseUrl);
   const port = options?.port ?? DEFAULT_REDIRECT_PORT;
   const scope = options?.scope ?? DEFAULT_SCOPE;
-  const redirectUri = `http://localhost:${port}/callback`;
+  const redirectUri = `http://127.0.0.1:${port}/callback`;
 
   // Step 1: Determine client — use provided client ID or fall back to dynamic registration
   let client: ClientConfig;
@@ -687,7 +696,7 @@ export async function playwrightLogin(
   const base = normalizeBaseUrl(baseUrl);
   const port = options?.port ?? DEFAULT_REDIRECT_PORT;
   const scope = options?.scope ?? DEFAULT_SCOPE;
-  const redirectUri = `http://localhost:${port}/callback`;
+  const redirectUri = `http://127.0.0.1:${port}/callback`;
   const hasCredentials = !!(options?.username && options?.password);
 
   // Step 1: Ensure registered OAuth2 client (with stale-client auto-recovery)
