@@ -16,7 +16,7 @@ class VegaQueryResource:
     def execute(
         self,
         *,
-        tables: list[str] | list[dict[str, Any]] | None = None,
+        tables: list[str | dict[str, Any]] | None = None,
         filter_condition: Any = None,
         output_fields: list[str] | None = None,
         sort: list[dict[str, Any]] | None = None,

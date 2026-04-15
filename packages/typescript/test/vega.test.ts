@@ -199,6 +199,25 @@ test("setVegaConnectorTypeEnabled sends POST to /connector-types/:type/enabled",
   }
 });
 
+test("sqlQuery sends POST to /resources/query with JSON body", async () => {
+  const mock = mockFetch({ columns: [{ name: "x", type: "int" }], entries: [{ x: 1 }], total_count: 1 });
+  try {
+    const client = makeClient();
+    const result = await client.vega.sqlQuery(
+      JSON.stringify({ query: "SELECT 1 AS x", resource_type: "mysql" }),
+    );
+    assert.equal(mock.calls[0].method, "POST");
+    const url = new URL(mock.calls[0].url);
+    assert.equal(url.pathname, "/api/vega-backend/v1/resources/query");
+    const body = JSON.parse(mock.calls[0].body!);
+    assert.equal(body.query, "SELECT 1 AS x");
+    assert.equal(body.resource_type, "mysql");
+    assert.deepEqual((result as Record<string, unknown>).entries, [{ x: 1 }]);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("vega resource has no previewResource method (backend has no preview endpoint)", () => {
   const client = makeClient();
   assert.equal(
