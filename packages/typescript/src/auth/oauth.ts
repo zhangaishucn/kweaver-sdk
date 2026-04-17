@@ -2261,6 +2261,16 @@ export async function withTokenRetry<T>(
         throw error;
       }
       const platformUrl = normalizeBaseUrl(token.baseUrl);
+      // env-sourced token: no refresh_token / OAuth client — refresh is impossible.
+      // Surface an env-aware hint instead of telling the user to `auth login` (which writes to disk).
+      if (process.env.KWEAVER_TOKEN && !token.refreshToken) {
+        throw new Error(
+          `Authentication failed (401) for ${platformUrl}. Your KWEAVER_TOKEN appears to be invalid or expired.\n` +
+            `  - Refresh the token and re-export: export KWEAVER_TOKEN=<new-token>\n` +
+            `  - Or run \`kweaver auth login ${platformUrl}\` to save a full session (with refresh_token) to ~/.kweaver/.`,
+          { cause: error },
+        );
+      }
       const envUser = process.env.KWEAVER_USER;
       let latest: TokenConfig | null;
       if (envUser) {
