@@ -52,13 +52,13 @@ export async function runConfigCommand(args: string[]): Promise<number> {
       console.error("Usage: kweaver config set-bd <value>");
       return 1;
     }
-    const platform = getCurrentPlatform();
+    const platform = getCurrentPlatform() ?? process.env.KWEAVER_BASE_URL?.trim();
     if (!platform) {
-      console.error("No active platform. Run `kweaver auth login <url>` first.");
+      console.error("No active platform. Run `kweaver auth login <url>` first.\n  Tip: set KWEAVER_BASE_URL to write the business domain for that platform.");
       return 1;
     }
     savePlatformBusinessDomain(platform, value);
-    console.log(`Business domain set to: ${value}`);
+    console.log(`Business domain set to: ${value} (${getCurrentPlatform() ? platform : `${platform} via KWEAVER_BASE_URL`})`);
     return 0;
   }
 
