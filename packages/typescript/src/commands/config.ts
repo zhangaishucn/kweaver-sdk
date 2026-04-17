@@ -1,5 +1,14 @@
 import { listBusinessDomains } from "../api/business-domains.js";
-import { withTokenRetry } from "../auth/oauth.js";
+import { normalizeBaseUrl, withTokenRetry } from "../auth/oauth.js";
+
+// Resolve platform URL: saved current platform > KWEAVER_BASE_URL (normalized to
+// match what `auth login` writes, so env users share the same platforms/<key>/ dir).
+function resolvePlatformUrl(): string | undefined {
+  const saved = getCurrentPlatform();
+  if (saved) return saved;
+  const env = process.env.KWEAVER_BASE_URL?.trim();
+  return env ? normalizeBaseUrl(env) : undefined;
+}
 import {
   getCurrentPlatform,
   loadPlatformBusinessDomain,
@@ -29,7 +38,7 @@ export async function runConfigCommand(args: string[]): Promise<number> {
   }
 
   if (sub === "show") {
-    const platform = getCurrentPlatform() ?? process.env.KWEAVER_BASE_URL?.trim();
+    const platform = resolvePlatformUrl();
     if (!platform) {
       console.error("No active platform. Run `kweaver auth login <url>` first.\n  Tip: set KWEAVER_BASE_URL to use this command without a saved login.");
       return 1;
@@ -52,7 +61,7 @@ export async function runConfigCommand(args: string[]): Promise<number> {
       console.error("Usage: kweaver config set-bd <value>");
       return 1;
     }
-    const platform = getCurrentPlatform() ?? process.env.KWEAVER_BASE_URL?.trim();
+    const platform = resolvePlatformUrl();
     if (!platform) {
       console.error("No active platform. Run `kweaver auth login <url>` first.\n  Tip: set KWEAVER_BASE_URL to write the business domain for that platform.");
       return 1;
@@ -63,7 +72,7 @@ export async function runConfigCommand(args: string[]): Promise<number> {
   }
 
   if (sub === "list-bd") {
-    const platform = getCurrentPlatform() ?? process.env.KWEAVER_BASE_URL?.trim();
+    const platform = resolvePlatformUrl();
     if (!platform) {
       console.error("No active platform. Run `kweaver auth login <url>` first.\n  Tip: set KWEAVER_BASE_URL and KWEAVER_TOKEN to use this command without a saved login.");
       return 1;

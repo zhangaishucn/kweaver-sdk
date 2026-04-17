@@ -403,7 +403,8 @@ Login options:
 
     const platform = statusTarget ?? getCurrentPlatform();
     if (!platform) {
-      const envUrl = process.env.KWEAVER_BASE_URL?.trim();
+      const envRaw = process.env.KWEAVER_BASE_URL?.trim();
+      const envUrl = envRaw ? normalizeBaseUrl(envRaw) : undefined;
       const envToken = process.env.KWEAVER_TOKEN?.trim();
       if (!envUrl || !envToken) {
         console.error(
@@ -683,7 +684,8 @@ Options:
   const platform = resolved && /^https?:\/\//.test(resolved) ? normalizeBaseUrl(resolved) : resolved ?? getCurrentPlatform();
 
   if (!platform) {
-    const envUrl = process.env.KWEAVER_BASE_URL?.trim();
+    const envRaw = process.env.KWEAVER_BASE_URL?.trim();
+    const envUrl = envRaw ? normalizeBaseUrl(envRaw) : undefined;
     const envToken = process.env.KWEAVER_TOKEN?.trim();
     if (!envUrl || !envToken) {
       console.error("No active platform. Run `kweaver auth login <platform-url>` first.");
