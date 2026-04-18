@@ -31,6 +31,8 @@ export KWEAVER_BASE_URL=https://your-kweaver-instance.com
 export KWEAVER_TOKEN=your-token
 ```
 
+两者同时设置时，即使未执行 `auth login`，业务命令也会使用该 token。若 **`~/.kweaver/` 无当前平台**，仍可使用 **`kweaver auth status`**、**`kweaver auth whoami`**（支持 `--json`）、**`kweaver config show`**：CLI 会在本地解 JWT 展示身份；若 token 为 opaque，则省略身份字段并给出简短提示。
+
 ### 业务域（平台配置）
 
 在调用依赖租户范围的接口前，应先确认业务域；DIP 环境通常使用 **UUID**，不能长期只依赖默认 `bd_public`。
@@ -144,11 +146,13 @@ const skillMd = await client.skills.fetchContent("skill-id");
 ## 命令速查
 
 ```
-kweaver auth login <url> [--alias name] [--no-auth] [--no-browser] [-u user] [-p pass] [--playwright] [--insecure|-k]
+kweaver auth login <url> [--alias name] [--no-auth] [--no-browser] [-u user] [-p pass] [--http-signin] [--playwright] [--insecure|-k]
+# -u/-p：默认先试 HTTP /oauth2/signin（可拿 refresh_token）；无 studioweb 时：已装 Playwright 则回退无头浏览器，否则提示安装 Playwright；--http-signin 仅 HTTP；--playwright 强制浏览器
 kweaver auth login <url> --client-id ID --client-secret S --refresh-token T   (无浏览器登录)
 kweaver auth export [url|alias] [--json]   (导出在无浏览器机器上运行的命令)
-kweaver auth status/list/use/delete/logout
-kweaver config show / list-bd / set-bd <value>   # 平台业务域，登录后优先
+kweaver auth status / whoami [url|alias] [--json]   # whoami 支持 --json；无 ~/.kweaver/ 当前平台时可配 KWEAVER_BASE_URL+KWEAVER_TOKEN
+kweaver auth list/use/delete/logout
+kweaver config show / list-bd / set-bd <value>   # 业务域；show/list-bd 在无已保存平台时可与 env 配对
 kweaver token
 kweaver ds list/get/delete/tables/connect
 kweaver dataflow list/run/runs/logs

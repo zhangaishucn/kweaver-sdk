@@ -31,6 +31,8 @@ export KWEAVER_BASE_URL=https://your-kweaver-instance.com
 export KWEAVER_TOKEN=your-token
 ```
 
+With both set, API commands use that token even if you never ran `auth login`. You can also run **`kweaver auth status`**, **`kweaver auth whoami`** (supports `--json`), and **`kweaver config show`** when there is **no** current platform in `~/.kweaver/` — the CLI decodes the token locally (JWT only). If the token is opaque, identity fields are omitted and a short hint is printed.
+
 ### Business domain (platform)
 
 Set or verify **before** calling list/query APIs that scope by tenant. DIP deployments often need a UUID, not only `bd_public`.
@@ -151,11 +153,13 @@ const skillMd = await client.skills.fetchContent("skill-id");
 ## CLI Reference
 
 ```
-kweaver auth login <url> [--alias name] [--no-auth] [--no-browser] [-u user] [-p pass] [--playwright] [--insecure|-k]
+kweaver auth login <url> [--alias name] [--no-auth] [--no-browser] [-u user] [-p pass] [--http-signin] [--playwright] [--insecure|-k]
+# -u/-p: tries HTTP /oauth2/signin first (refresh_token). If studioweb is missing: falls back to Playwright when installed, else prints install hint. --http-signin: HTTP only. --playwright: force browser automation.
 kweaver auth login <url> --client-id ID --client-secret S --refresh-token T   (headless login)
 kweaver auth export [url|alias] [--json]   (export command to run on a headless host)
-kweaver auth status/list/use/delete/logout
-kweaver config show / list-bd / set-bd <value>   # platform business domain — after login
+kweaver auth status / whoami [url|alias] [--json]   # whoami: --json; with KWEAVER_BASE_URL+KWEAVER_TOKEN when no ~/.kweaver/ platform
+kweaver auth list/use/delete/logout
+kweaver config show / list-bd / set-bd <value>   # platform business domain — show/list-bd work with KWEAVER_BASE_URL (+ KWEAVER_TOKEN for list-bd)
 kweaver token
 kweaver ds list/get/delete/tables/connect
 kweaver ds import-csv <ds_id> --files <glob> [--table-prefix <p>] [--batch-size 500] [--recreate]

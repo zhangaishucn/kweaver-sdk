@@ -13,7 +13,8 @@ npm install playwright && npx playwright install chromium
 ## 命令
 
 ```bash
-kweaver auth login <url> [--alias <name>] [--no-auth] [--no-browser] [-u user] [-p pass] [--playwright]
+kweaver auth login <url> [--alias <name>] [--no-auth] [--no-browser] [-u user] [-p pass]
+                         [--http-signin] [--playwright]
                          [--port <n>] [--insecure|-k]
 kweaver auth <url> [--alias <name>] ...              # 同上（简写）
 kweaver auth whoami [url|alias] [--json]              # 显示当前用户身份
@@ -26,6 +27,21 @@ kweaver auth switch [url|alias] --user <id|username>  # 切换活跃用户
 kweaver auth logout [url|alias] [--user <id|username>]
 kweaver auth delete <url|alias> [--user <id|username>]
 ```
+
+## 环境变量与 ~/.kweaver/ 的边界
+
+| 场景 | 是否读 `KWEAVER_TOKEN` / `KWEAVER_BASE_URL` | 说明 |
+|------|---------------------------------------------|------|
+| 业务命令（`bkn`、`call`、`agent`、`kn`、`vega` 等） | 是 | 解析顺序一般为 **显式参数 > 环境变量 > `~/.kweaver/`**（与 SDK 一致）。 |
+| `kweaver auth status`、`kweaver auth whoami`、`kweaver config show` | 是（兜底） | 默认读 `~/.kweaver/` 的当前平台；**若无当前平台**，可同时设置 `KWEAVER_BASE_URL` + `KWEAVER_TOKEN`，CLI 会本地解 JWT 展示身份。token 为 opaque 时省略身份字段并给出简短提示，**不额外请求远端接口、不增加新旗标**。 |
+| `kweaver auth users` / `auth switch` / `auth export`、`kweaver config set-bd` | 否 | 只操作本地已保存的多用户档案或写 `~/.kweaver/`；环境变量中的 token **不会**被这些命令读取。 |
+
+**常用环境变量**：`KWEAVER_BASE_URL`（与 `KWEAVER_TOKEN` 配对时通常必填）、`KWEAVER_TOKEN`（可带或不带 `Bearer ` 前缀）、`KWEAVER_TLS_INSECURE`、`KWEAVER_BUSINESS_DOMAIN`、`KWEAVER_USER`、`KWEAVER_NO_AUTH`。
+
+**env 模式下 `auth status` / `whoami` 输出**：`whoami` 会标注 `Source: env (KWEAVER_TOKEN)`；refresh_token 在 env 路径下为 **n/a**。`whoami --json` 输出包含 `"source": "env"` 以及 JWT payload（若 token 为 JWT）。
+
+**FAQ：只设置了 `KWEAVER_TOKEN` 仍报错？**  
+`auth status` / `whoami` / `config show` 需要能定位平台：请同时设置 **`KWEAVER_BASE_URL`**，或执行 `kweaver auth login <url>` 将凭据写入 `~/.kweaver/`。
 
 ## 无认证平台（no-auth）
 
@@ -109,7 +125,9 @@ auth.login(no_browser=True)
 ## 说明
 
 - **OAuth2 授权码登录**（默认）：获取 `access_token` + `refresh_token`，过期自动刷新
-- **Playwright cookie 登录**（`-u`/`-p` 或 `--playwright`）：无 `refresh_token`，过期需重新登录
+- **HTTP 密码登录（默认，`-u`/`-p` 且未加 `--http-signin`/`--playwright`）**：优先走 `POST /oauth2/signin`（与 Studio studioweb 壳一致），可拿到 `refresh_token`；公钥优先取页面，否则内置候选。若平台**没有** studioweb 壳：已安装 Playwright 时自动回退 Playwright 无头填表；未安装则终端提示安装 Playwright，或改用 `kweaver auth login <url> --no-browser`。
+- **仅 HTTP 密码登录**（`-u`/`-p` + `--http-signin`）：不尝试 Playwright；studioweb 不可用时直接失败。DIP 可设 `KWEAVER_OAUTH_PRODUCT=dip`。解密失败等见 `packages/typescript/README.md` 环境变量说明。
+- **强制 Playwright**（`-u`/`-p` + `--playwright`）：跳过 HTTP，直接自动化浏览器填表。仅 `--playwright`（无密码）：打开浏览器由用户手动登录。
 - Token 有效期 1 小时
 - `--alias` 设置短名称方便切换
 - `--insecure` / `-k`：跳过 TLS 证书校验（仅用于自签名/内网开发环境）

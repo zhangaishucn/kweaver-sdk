@@ -1,4 +1,6 @@
 import type { Server } from "node:http";
+import { readFile } from "node:fs/promises";
+import { createPublicKey, constants as cryptoConstants, publicEncrypt, randomBytes } from "node:crypto";
 import { isNoAuth } from "../config/no-auth.js";
 import {
   type ClientConfig,
@@ -23,6 +25,255 @@ const REFRESH_THRESHOLD_SEC = 60;
 
 const DEFAULT_REDIRECT_PORT = 9010;
 const DEFAULT_SCOPE = "openid offline all";
+
+/**
+ * Studioweb hardcoded LOGIN public key (PEM) — the single key used for HTTP `/oauth2/signin`.
+ * Source: kweaver-ai/kweaver `deploy/auto_cofig/auto_config.sh` `LOGIN_PUBLIC_KEY`.
+ */
+export const STUDIOWEB_LOGIN_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsyOstgbYuubBi2PUqeVj
+GKlkwVUY6w1Y8d4k116dI2SkZI8fxcjHALv77kItO4jYLVplk9gO4HAtsisnNE2o
+wlYIqdmyEPMwupaeFFFcg751oiTXJiYbtX7ABzU5KQYPjRSEjMq6i5qu/mL67XTk
+hvKwrC83zme66qaKApmKupDODPb0RRkutK/zHfd1zL7sciBQ6psnNadh8pE24w8O
+2XVy1v2bgSNkGHABgncR7seyIg81JQ3c/Axxd6GsTztjLnlvGAlmT1TphE84mi99
+fUaGD2A1u1qdIuNc+XuisFeNcUW6fct0+x97eS2eEGRr/7qxWmO/P20sFVzXc2bF
+1QIDAQAB
+-----END PUBLIC KEY-----`;
+
+/**
+ * Default RSA modulus (hex) for `/oauth2/signin` when `__NEXT_DATA__` has no `publicKey` / `modulus`.
+ * DIP / EACP / AnyShare-style deployments use the ISFWeb `core/auth` PUBLIC_KEY (1024-bit, exp 65537).
+ * Prefer key material from the sign-in page when present.
+ */
+export const DEFAULT_SIGNIN_RSA_MODULUS_HEX =
+  "C1D9F84B95AF6B331FBA2D64D76A39CAD7529DA79DB4B3543E4DF3DF21723FEC6F7E2F6602E11037339AE0462DF6B39F94150FC256A505A8CA95BB3699E25C3FB84764D6A1DC3F483A2C1DC4F70925D85725151D0CFBF1EB5A6C4FA0E37ED32FED150C717CD82C528745CDB761D17635AC855421B3CBBEE7D405B2CA5C70CFA7";
+
+/**
+ * Default PEM for HTTP `/oauth2/signin`: **the fixed `STUDIOWEB_LOGIN_PUBLIC_KEY_PEM`** (matches
+ * `kweaver-ai/kweaver/deploy/auto_cofig/auto_config.sh` `LOGIN_PUBLIC_KEY`). KWeaver platforms have
+ * standardized on this single key — no fallback list, no probing of `__NEXT_DATA__` page key, no
+ * `trying next candidate…` noise. Override with `--signin-public-key-file` /
+ * `KWEAVER_SIGNIN_RSA_PUBLIC_KEY` if a deployment ever ships a different public key.
+ */
+function buildHttpSigninPemCandidates(_parsedMaterial: string | undefined): string[] {
+  return [STUDIOWEB_LOGIN_PUBLIC_KEY_PEM];
+}
+
+/**
+ * Build an SPKI PEM from an RSA modulus (hex) and public exponent (default 65537 / 0x10001).
+ */
+export function rsaModulusHexToSpkiPem(modulusHex: string, exponent: number = 65537): string {
+  const hex = modulusHex.replace(/\s+/g, "");
+  if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) {
+    throw new Error("RSA modulus must be an even-length hex string.");
+  }
+  const nBuf = Buffer.from(hex, "hex");
+  const eBytes: number[] = [];
+  let exp = exponent;
+  while (exp > 0) {
+    eBytes.unshift(exp & 0xff);
+    exp >>= 8;
+  }
+  const eBuf = Buffer.from(eBytes);
+  const key = createPublicKey({
+    key: {
+      kty: "RSA",
+      n: nBuf.toString("base64url"),
+      e: eBuf.toString("base64url"),
+    },
+    format: "jwk",
+  });
+  return key.export({ type: "spki", format: "pem" }) as string;
+}
+
+/**
+ * Import SPKI DER from Base64 (no PEM headers) — same shape as af-agent `RSA.importKey(base64.b64decode(...))`.
+ */
+function tryDerSpkiBase64ToPem(material: string): string | null {
+  const trimmed = material.replace(/\s+/g, "");
+  if (trimmed.length < 80 || !/^[A-Za-z0-9+/]+=*$/.test(trimmed)) {
+    return null;
+  }
+  try {
+    const buf = Buffer.from(trimmed, "base64");
+    const key = createPublicKey({ key: buf, format: "der", type: "spki" });
+    return key.export({ type: "spki", format: "pem" }) as string;
+  } catch {
+    return null;
+  }
+}
+
+function isLikelyRsaHexModulusString(s: string): boolean {
+  const h = s.replace(/\s+/g, "");
+  return h.length >= 128 && h.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(h);
+}
+
+function isLikelySpkiBase64String(s: string): boolean {
+  const t = s.replace(/\s+/g, "");
+  if (t.length < 200 || !/^[A-Za-z0-9+/]+=*$/.test(t)) {
+    return false;
+  }
+  return tryDerSpkiBase64ToPem(t) !== null;
+}
+
+/**
+ * PEM from page (`BEGIN PUBLIC KEY` / `BEGIN RSA PUBLIC KEY`), hex modulus, or Base64 SPKI DER.
+ * When `material` is missing, uses the built-in modulus (`DEFAULT_SIGNIN_RSA_MODULUS_HEX`) so
+ * `--http-signin` does not require extra CLI flags. Opt out with `KWEAVER_SIGNIN_DISALLOW_BUILTIN_MODULUS=1`.
+ */
+function resolveSigninPublicKeyPem(
+  material: string | undefined,
+  opts?: { allowBuiltinModulus?: boolean },
+): string {
+  const disallowBuiltin =
+    opts?.allowBuiltinModulus === false || process.env.KWEAVER_SIGNIN_DISALLOW_BUILTIN_MODULUS === "1";
+  if (material?.trim()) {
+    const m = material.trim();
+    if (m.includes("BEGIN PUBLIC KEY") || m.includes("BEGIN RSA PUBLIC KEY")) {
+      return m;
+    }
+    const hex = m.replace(/\s+/g, "");
+    if (/^[0-9a-fA-F]+$/.test(hex) && hex.length % 2 === 0) {
+      return rsaModulusHexToSpkiPem(hex);
+    }
+    const fromDer = tryDerSpkiBase64ToPem(m);
+    if (fromDer) {
+      return fromDer;
+    }
+    throw new Error(
+      "RSA public key material is present but could not be parsed (expected PEM, hex modulus, or Base64 SPKI).",
+    );
+  }
+  if (disallowBuiltin) {
+    throw new Error(
+      "No RSA public key in sign-in HTML and built-in modulus disabled (KWEAVER_SIGNIN_DISALLOW_BUILTIN_MODULUS=1). " +
+        "Use --signin-public-key-file or KWEAVER_SIGNIN_RSA_PUBLIC_KEY.",
+    );
+  }
+  return rsaModulusHexToSpkiPem(DEFAULT_SIGNIN_RSA_MODULUS_HEX.replace(/\s+/g, ""));
+}
+
+/**
+ * Recursively find a string that looks like PEM, hex modulus, or Base64 SPKI in `pageProps` (nested configs).
+ */
+function deepFindSigninRsaMaterial(obj: unknown, depth: number, seen: Set<unknown>): string | undefined {
+  if (depth < 0 || obj === null || obj === undefined) {
+    return undefined;
+  }
+  if (typeof obj === "string") {
+    const t = obj.trim();
+    if (!t) {
+      return undefined;
+    }
+    if (t.includes("BEGIN PUBLIC KEY") || t.includes("BEGIN RSA PUBLIC KEY")) {
+      return t;
+    }
+    if (isLikelyRsaHexModulusString(t)) {
+      return t.replace(/\s+/g, "");
+    }
+    if (isLikelySpkiBase64String(t)) {
+      return t.replace(/\s+/g, "");
+    }
+    return undefined;
+  }
+  if (typeof obj !== "object") {
+    return undefined;
+  }
+  if (seen.has(obj)) {
+    return undefined;
+  }
+  seen.add(obj);
+  if (Array.isArray(obj)) {
+    for (const el of obj) {
+      const r = deepFindSigninRsaMaterial(el, depth - 1, seen);
+      if (r) {
+        return r;
+      }
+    }
+    return undefined;
+  }
+  const rec = obj as Record<string, unknown>;
+  for (const k of Object.keys(rec)) {
+    const r = deepFindSigninRsaMaterial(rec[k], depth - 1, seen);
+    if (r) {
+      return r;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Regex fallback when JSON path differs (escaped quotes, minified bundles, inline scripts).
+ * Some deployments put the SPKI Base64 as a raw substring (no JSON key).
+ */
+function extractSigninRsaMaterialFromHtml(html: string): string | undefined {
+  const pemPub = html.match(/-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLIC KEY-----/);
+  if (pemPub) {
+    return pemPub[0].trim();
+  }
+  const pemRsa = html.match(/-----BEGIN RSA PUBLIC KEY-----[\s\S]*?-----END RSA PUBLIC KEY-----/);
+  if (pemRsa) {
+    return pemRsa[0].trim();
+  }
+
+  const jsonPatterns: RegExp[] = [
+    /"modulus"\s*:\s*"([0-9a-fA-F]{128,})"/,
+    /'modulus'\s*:\s*'([0-9a-fA-F]{128,})'/,
+    /"(?:publicKey|rsaPublicKey|public_key|encryptPublicKey|rsaModulus|passwordPublicKey|loginPublicKey|pwdPublicKey|encryptKey)"\s*:\s*"([A-Za-z0-9+/=\s]{200,})"/,
+    /'(?:publicKey|rsaPublicKey|public_key)'\s*:\s*'([A-Za-z0-9+/=]{200,})'/,
+  ];
+  for (const re of jsonPatterns) {
+    const m = html.match(re);
+    if (m?.[1]) {
+      return m[1].replace(/\s+/g, "");
+    }
+  }
+
+  // Raw SPKI Base64 blocks (2048-bit RSA SPKI often starts with MIIBIjAN…)
+  const rawSpki = html.match(
+    /(MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA[A-Za-z0-9+/=]{80,800})/,
+  );
+  if (rawSpki) {
+    return rawSpki[1].replace(/\s+/g, "");
+  }
+  const rawSpki1024 = html.match(
+    /(MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQ[A-Za-z0-9+/=\s]{80,500})/,
+  );
+  if (rawSpki1024) {
+    return rawSpki1024[1].replace(/\s+/g, "");
+  }
+  return undefined;
+}
+
+/** Match `rsa.min` / Studio `rsaEncrypt`: base64 with newline every 64 chars (EACP may validate format). */
+function formatPasswordBase64LikeRsaMin(b64: string): string {
+  return b64.replace(/(.{64})/g, "$1\n");
+}
+
+function extractRsaPublicKeyMaterialFromPageProps(pageProps: Record<string, unknown>): string | undefined {
+  const keys = [
+    "publicKey",
+    "rsaPublicKey",
+    "public_key",
+    "modulus",
+    "encryptPublicKey",
+    "pubKey",
+    "rsaModulus",
+    "passwordPublicKey",
+    "loginPublicKey",
+    "encryptKey",
+    "pwdPublicKey",
+    "modulusHex",
+    "rsaPublicKeyHex",
+  ];
+  for (const k of keys) {
+    const v = pageProps[k];
+    if (typeof v === "string" && v.trim()) {
+      return v.trim();
+    }
+  }
+  return deepFindSigninRsaMaterial(pageProps, 5, new Set());
+}
 
 /** Best-effort fetch of display name via EACP userinfo (ShareServer). */
 async function fetchDisplayName(
@@ -147,7 +398,8 @@ export function normalizeBaseUrl(value: string): string {
  * Temporarily disable TLS certificate verification for Node `fetch` (sets
  * NODE_TLS_REJECT_UNAUTHORIZED). Used for `--insecure` login and token refresh.
  */
-async function runWithTlsInsecure<T>(tlsInsecure: boolean | undefined, fn: () => Promise<T>): Promise<T> {
+/** @internal Exported for CLI env-only identity resolution (`env-snapshot.ts`). */
+export async function runWithTlsInsecure<T>(tlsInsecure: boolean | undefined, fn: () => Promise<T>): Promise<T> {
   if (!tlsInsecure) {
     return fn();
   }
@@ -874,6 +1126,564 @@ export async function playwrightLogin(
   });
 }
 
+function mergeCookieJarForSignin(existing: string, response: Response): string {
+  const setCookies =
+    typeof response.headers.getSetCookie === "function"
+      ? response.headers.getSetCookie()
+      : (() => {
+          const raw = response.headers.get("set-cookie");
+          return raw ? [raw] : [];
+        })();
+  const map = new Map<string, string>();
+  for (const part of existing
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean)) {
+    const eq = part.indexOf("=");
+    if (eq > 0) map.set(part.slice(0, eq), part.slice(eq + 1));
+  }
+  for (const sc of setCookies) {
+    const first = sc.split(";")[0]?.trim() ?? "";
+    const eq = first.indexOf("=");
+    if (eq > 0) map.set(first.slice(0, eq), first.slice(eq + 1));
+  }
+  return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+/**
+ * Parse query parameters from a `Location` header value (absolute or relative URL).
+ */
+function parseQueryFromLocationHeader(location: string): Record<string, string> {
+  const q = location.includes("?") ? location.slice(location.indexOf("?")) : "";
+  const params = new URLSearchParams(q.startsWith("?") ? q.slice(1) : q);
+  const out: Record<string, string> = {};
+  params.forEach((v, k) => {
+    out[k] = v;
+  });
+  return out;
+}
+
+/**
+ * Parse Next.js `__NEXT_DATA__` from the OAuth2 sign-in HTML shell (CSRF + optional challenge/remember for POST /oauth2/signin).
+ * Hydra `login_challenge` may appear only in the sign-in URL; use that when `pageProps.challenge` is absent.
+ */
+export function parseSigninPageHtmlProps(html: string): {
+  challenge?: string;
+  csrftoken: string;
+  remember?: boolean;
+  /** Hex modulus, PEM, or Base64 SPKI from page (nested search + HTML regex fallback). */
+  rsaPublicKeyMaterial?: string;
+} {
+  const m = html.match(/<script[^>]*\bid=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (!m) {
+    throw new Error("Could not find __NEXT_DATA__ on the sign-in page.");
+  }
+  const data = JSON.parse(m[1]) as Record<string, unknown>;
+  const pageProps = (data.props as Record<string, unknown> | undefined)?.pageProps as
+    | Record<string, unknown>
+    | undefined;
+  if (!pageProps) {
+    throw new Error("Invalid __NEXT_DATA__: missing pageProps.");
+  }
+  const challenge = pageProps.challenge;
+  const csrftoken = pageProps.csrftoken ?? pageProps._csrf;
+  if (typeof csrftoken !== "string") {
+    throw new Error(
+      "Sign-in page did not expose csrftoken (expected in __NEXT_DATA__.props.pageProps).",
+    );
+  }
+  const challengeStr = typeof challenge === "string" ? challenge : undefined;
+  const rememberRaw = pageProps.remember;
+  const remember =
+    typeof rememberRaw === "boolean"
+      ? rememberRaw
+      : typeof rememberRaw === "string"
+        ? rememberRaw === "true"
+        : undefined;
+  let rsaPublicKeyMaterial = extractRsaPublicKeyMaterialFromPageProps(pageProps);
+  if (!rsaPublicKeyMaterial) {
+    rsaPublicKeyMaterial = deepFindSigninRsaMaterial(data, 10, new Set());
+  }
+  if (!rsaPublicKeyMaterial) {
+    rsaPublicKeyMaterial = extractSigninRsaMaterialFromHtml(html);
+  }
+  return { challenge: challengeStr, csrftoken, remember, rsaPublicKeyMaterial };
+}
+
+async function followSigninRedirectsUntilCallback(
+  startUrl: string,
+  initialJar: string,
+  state: string,
+  redirectUri: string,
+  base: string,
+  scope: string,
+): Promise<{ code: string; jar: string }> {
+  let url = startUrl;
+  let jar = initialJar;
+  const callbackHost = new URL(redirectUri).origin;
+  const callbackPath = new URL(redirectUri).pathname;
+
+  for (let hop = 0; hop < 40; hop++) {
+    const resp = await fetch(url, {
+      method: "GET",
+      headers: {
+        Cookie: jar,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      redirect: "manual",
+    });
+    jar = mergeCookieJarForSignin(jar, resp);
+
+    if (resp.status === 302 || resp.status === 303 || resp.status === 307 || resp.status === 308) {
+      const loc = resp.headers.get("location");
+      if (!loc) {
+        throw new HttpError(resp.status, "Missing Location", "");
+      }
+      const next = new URL(loc, url);
+      if (next.origin === callbackHost && next.pathname === callbackPath) {
+        const code = next.searchParams.get("code");
+        const st = next.searchParams.get("state");
+        if (st !== state) {
+          throw new Error("OAuth2 state mismatch — possible CSRF attack.");
+        }
+        const err = next.searchParams.get("error");
+        if (err) {
+          const desc = next.searchParams.get("error_description") ?? "";
+          throw new Error(desc ? `Authorization failed: ${err} — ${desc}` : `Authorization failed: ${err}`);
+        }
+        if (!code) {
+          throw new Error("Callback URL missing authorization code.");
+        }
+        return { code, jar };
+      }
+      url = next.href;
+      continue;
+    }
+
+    if (resp.status === 200) {
+      const html = await resp.text();
+      const consentResult = await tryAcceptConsentAfterSignin(
+        base,
+        url,
+        html,
+        jar,
+        scope,
+        state,
+        redirectUri,
+      );
+      if (consentResult) {
+        return consentResult;
+      }
+      throw new Error(
+        `Unexpected OAuth page (HTTP 200) at ${url.slice(0, 120)}… ` +
+          `If this is a consent or MFA screen, use browser login or Playwright.`,
+      );
+    }
+
+    const text = await resp.text().catch(() => "");
+    throw new HttpError(resp.status, resp.statusText, text);
+  }
+  throw new Error("Too many OAuth redirects.");
+}
+
+async function tryAcceptConsentAfterSignin(
+  base: string,
+  pageUrl: string,
+  html: string,
+  jar: string,
+  scope: string,
+  state: string,
+  redirectUri: string,
+): Promise<{ code: string; jar: string } | null> {
+  let data: Record<string, unknown>;
+  try {
+    const m = html.match(/<script[^>]*\bid=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+    if (!m) {
+      return null;
+    }
+    data = JSON.parse(m[1]) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const pageProps = (data.props as Record<string, unknown> | undefined)?.pageProps as
+    | Record<string, unknown>
+    | undefined;
+  if (!pageProps) {
+    return null;
+  }
+  const consentChallenge = pageProps.consent_challenge;
+  if (typeof consentChallenge !== "string") {
+    return null;
+  }
+
+  const scopes = scope.split(/\s+/).filter(Boolean);
+  const body = new URLSearchParams();
+  body.set("consent_challenge", consentChallenge);
+  for (const s of scopes) {
+    body.append("grant_scope", s);
+  }
+  const resp = await fetch(`${base}/oauth2/consent`, {
+    method: "POST",
+    headers: {
+      Cookie: jar,
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+    },
+    body: body.toString(),
+    redirect: "manual",
+  });
+  const newJar = mergeCookieJarForSignin(jar, resp);
+  if (resp.status === 302 || resp.status === 303 || resp.status === 307) {
+    const loc = resp.headers.get("location");
+    if (!loc) {
+      throw new HttpError(resp.status, "Missing Location after consent", "");
+    }
+    return followSigninRedirectsUntilCallback(
+      new URL(loc, pageUrl).href,
+      newJar,
+      state,
+      redirectUri,
+      base,
+      scope,
+    );
+  }
+  return null;
+}
+
+const STUDIOWEB_SHELL_UNAVAILABLE_SNIPPETS = [
+  "Studioweb signin endpoint not available",
+  "Cannot reach studioweb signin endpoint",
+] as const;
+
+/**
+ * True when {@link oauth2PasswordSigninLogin} failed because the Studio web sign-in shell
+ * (`/interface/studioweb/login`) is missing or unreachable — callers may fall back to Playwright.
+ */
+export function isStudiowebShellUnavailableError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return STUDIOWEB_SHELL_UNAVAILABLE_SNIPPETS.some((s) => msg.includes(s));
+}
+
+/**
+ * OAuth2 Authorization Code login using HTTP **only**: `GET /oauth2/signin` (Next.js shell) and
+ * `POST /oauth2/signin` with an RSA PKCS#1 v1.5–encrypted password (same as the browser `rsa.min` / Studio
+ * `core/mediator/auth` path).
+ *
+ * `/oauth2/auth` uses `product` `adp` by default (KWeaver Studio shell); set `oauthProduct` or `KWEAVER_OAUTH_PRODUCT` for DIP (`dip`).
+ * Password ciphertext defaults to **single-line base64** (PyCrypto-style); set `KWEAVER_SIGNIN_PASSWORD_B64_RSA_MIN=1` for rsa.min-style wrapped lines.
+ */
+export async function oauth2PasswordSigninLogin(
+  baseUrl: string,
+  options: {
+    username: string;
+    password: string;
+    port?: number;
+    scope?: string;
+    clientId?: string;
+    clientSecret?: string;
+    tlsInsecure?: boolean;
+    /**
+     * `product` query for `/oauth2/auth` (must match deployment). Default `adp`; DIP deployments often use `dip`.
+     * @default KWEAVER_OAUTH_PRODUCT env or `adp`
+     */
+    oauthProduct?: string;
+    /**
+     * Password ciphertext: `rsa.min` uses newline every 64 chars; PyCrypto / some gateways expect a single base64 line.
+     * @default false (single-line base64, matches kweaver-core EACP-style encryption)
+     */
+    signinPasswordBase64Plain?: boolean;
+    /**
+     * PEM / hex / Base64-SPKI file path — overrides key from the sign-in HTML.
+     * Env: `KWEAVER_SIGNIN_RSA_PUBLIC_KEY` (same path semantics as CLI `--signin-public-key-file`).
+     */
+    signinPublicKeyPemPath?: string;
+  },
+): Promise<TokenConfig> {
+  return runWithTlsInsecure(options.tlsInsecure, async () => {
+    const { publicEncrypt, constants: cryptoConstants } = await import("node:crypto");
+    const { randomBytes } = await import("node:crypto");
+
+    const base = normalizeBaseUrl(baseUrl);
+    const port = options.port ?? DEFAULT_REDIRECT_PORT;
+    const scope = options.scope ?? DEFAULT_SCOPE;
+    const redirectUri = `http://127.0.0.1:${port}/callback`;
+
+    const state = randomBytes(12).toString("hex");
+    const oauthProduct =
+      options.oauthProduct?.trim() ||
+      (typeof process.env.KWEAVER_OAUTH_PRODUCT === "string" && process.env.KWEAVER_OAUTH_PRODUCT.trim()
+        ? process.env.KWEAVER_OAUTH_PRODUCT.trim()
+        : "adp");
+
+    // Pre-flight: verify studioweb signin shell exists (same entry as deploy auto_config.sh get_token).
+    // If the deployment lacks studioweb, abort before OAuth client registration.
+    const studiowebProbeUrl =
+      `${base}/interface/studioweb/login?lang=zh-cn&state=${encodeURIComponent(state)}` +
+      `&x-forwarded-prefix=&integrated=false&product=${encodeURIComponent(oauthProduct)}&_t=${Date.now()}`;
+    let probeResp: Response;
+    try {
+      probeResp = await fetch(studiowebProbeUrl, { method: "GET", redirect: "manual" });
+    } catch (cause) {
+      throw new Error(
+        `Cannot reach studioweb signin endpoint at ${base}/interface/studioweb/login. ` +
+          `The deployment may not include studioweb. Use \`kweaver auth login ${base}\` ` +
+          `(OAuth code flow) instead.\n  Cause: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
+    const probeOk2xx = probeResp.status >= 200 && probeResp.status < 300;
+    const probeOkRedirect = [301, 302, 303, 307, 308].includes(probeResp.status);
+    await probeResp.text().catch(() => "");
+    if (!probeOk2xx && !probeOkRedirect) {
+      throw new Error(
+        `Studioweb signin endpoint not available at ${base}/interface/studioweb/login ` +
+          `(HTTP ${probeResp.status}). The deployment may not include studioweb. ` +
+          `Use \`kweaver auth login ${base}\` (OAuth code flow) instead.`,
+      );
+    }
+
+    let client: ClientConfig;
+    try {
+      client = await resolveOrRegisterClient(base, redirectUri, scope, {
+        clientId: options.clientId,
+        clientSecret: options.clientSecret,
+      });
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) {
+        process.stderr.write(
+          "OAuth2 endpoint not found (404). Saving platform in no-auth mode.\n",
+        );
+        return saveNoAuthPlatform(base, { tlsInsecure: options.tlsInsecure });
+      }
+      throw e;
+    }
+
+    const usePkce = !client.clientSecret;
+    const pkce = usePkce ? await generatePkce() : null;
+
+    const authParams = new URLSearchParams({
+      redirect_uri: redirectUri,
+      "x-forwarded-prefix": "",
+      client_id: client.clientId,
+      scope,
+      response_type: "code",
+      state,
+      lang: "zh-cn",
+      product: oauthProduct,
+    });
+    if (pkce) {
+      authParams.set("code_challenge", pkce.challenge);
+      authParams.set("code_challenge_method", "S256");
+    }
+    const authUrl = `${base}/oauth2/auth?${authParams.toString()}`;
+
+    let jar = "";
+    const authResp = await fetch(authUrl, { method: "GET", redirect: "manual" });
+    jar = mergeCookieJarForSignin(jar, authResp);
+    if (authResp.status !== 302 && authResp.status !== 303 && authResp.status !== 307) {
+      const t = await authResp.text();
+      throw new HttpError(authResp.status, authResp.statusText, t);
+    }
+    const authLoc = authResp.headers.get("location");
+    if (!authLoc) {
+      throw new HttpError(authResp.status, "Missing Location after /oauth2/auth", "");
+    }
+    const signinUrl = new URL(authLoc, base);
+    if (!signinUrl.pathname.includes("signin")) {
+      throw new Error(`Expected redirect to a sign-in page, got: ${authLoc}`);
+    }
+
+    const signinPageResp = await fetch(signinUrl.href, {
+      method: "GET",
+      headers: {
+        Cookie: jar,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      redirect: "manual",
+    });
+    jar = mergeCookieJarForSignin(jar, signinPageResp);
+    if (signinPageResp.status !== 200) {
+      const t = await signinPageResp.text();
+      throw new HttpError(signinPageResp.status, signinPageResp.statusText, t);
+    }
+    const html = await signinPageResp.text();
+    const parsed = parseSigninPageHtmlProps(html);
+    const loginChallenge =
+      signinUrl.searchParams.get("login_challenge")?.trim() || parsed.challenge?.trim();
+    if (!loginChallenge) {
+      throw new Error(
+        "Could not resolve login challenge: missing login_challenge in sign-in URL and __NEXT_DATA__.props.pageProps.challenge.",
+      );
+    }
+    const csrftoken = parsed.csrftoken;
+    const remember = parsed.remember ?? false;
+
+    const keyPath =
+      options.signinPublicKeyPemPath?.trim() ||
+      (typeof process.env.KWEAVER_SIGNIN_RSA_PUBLIC_KEY === "string"
+        ? process.env.KWEAVER_SIGNIN_RSA_PUBLIC_KEY.trim()
+        : "");
+    const pems: string[] = keyPath
+      ? [
+          resolveSigninPublicKeyPem((await readFile(keyPath, "utf8")).trim(), {
+            allowBuiltinModulus: false,
+          }),
+        ]
+      : buildHttpSigninPemCandidates(parsed.rsaPublicKeyMaterial);
+
+    const usePlainB64 =
+      options.signinPasswordBase64Plain === true
+        ? true
+        : options.signinPasswordBase64Plain === false
+          ? false
+          : process.env.KWEAVER_SIGNIN_PASSWORD_B64_RSA_MIN !== "1";
+
+    // Body shape matches browser `POST /oauth2/signin` (EACP / oauth2-ui); omitting vcode/dualfactorauthinfo
+    // causes 400 from eachttpserver (invalid parameter).
+    const postBody = {
+      _csrf: csrftoken,
+      challenge: loginChallenge,
+      account: options.username,
+      password: "",
+      vcode: { id: "", content: "" },
+      dualfactorauthinfo: {
+        validcode: { vcode: "" },
+        OTP: { OTP: "" },
+      },
+      remember,
+      device: {
+        name: "",
+        description: "",
+        client_type: "unknown",
+        udids: [],
+      },
+    };
+
+    const origin = new URL(base).origin;
+    /** Some gateways (e.g. DIP) return HTTP 200 + `{"redirect":"..."}` instead of 3xx Location. */
+    let signinRedirectFromJson: string | undefined;
+
+    // Single fixed RSA public key (STUDIOWEB_LOGIN_PUBLIC_KEY_PEM) unless the caller overrides via
+    // --signin-public-key-file / KWEAVER_SIGNIN_RSA_PUBLIC_KEY. No fallback list, no candidate noise.
+    const pem = pems[0];
+    const encrypted = publicEncrypt(
+      { key: pem, padding: cryptoConstants.RSA_PKCS1_PADDING },
+      Buffer.from(options.password, "utf8"),
+    );
+    const rawB64 = encrypted.toString("base64");
+    const passwordB64 = usePlainB64 ? rawB64 : formatPasswordBase64LikeRsaMin(rawB64);
+    postBody.password = passwordB64;
+
+    const postResp = await fetch(`${base}/oauth2/signin`, {
+      method: "POST",
+      headers: {
+        Cookie: jar,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/plain, */*",
+        Origin: origin,
+        Referer: signinUrl.href,
+      },
+      body: JSON.stringify(postBody),
+      redirect: "manual",
+    });
+    jar = mergeCookieJarForSignin(jar, postResp);
+
+    if (postResp.status !== 302 && postResp.status !== 303 && postResp.status !== 307) {
+      const bodyText = await postResp.text();
+
+      if (/RSA_private_decrypt/i.test(bodyText)) {
+        throw new Error(
+          "HTTP sign-in: RSA ciphertext rejected by server. The built-in STUDIOWEB_LOGIN_PUBLIC_KEY_PEM " +
+            "does not match this deployment's `/oauth2/signin` public key. Provide the correct key via " +
+            "--signin-public-key-file <pem> or KWEAVER_SIGNIN_RSA_PUBLIC_KEY=...",
+        );
+      }
+
+      if (postResp.status === 200) {
+        const ct = postResp.headers.get("content-type") ?? "";
+        const looksLikeJson =
+          ct.includes("application/json") || /^\s*\{/.test(bodyText);
+        if (looksLikeJson) {
+          let j: Record<string, unknown>;
+          try {
+            j = JSON.parse(bodyText) as Record<string, unknown>;
+          } catch {
+            throw new Error(`Sign-in failed: ${bodyText.slice(0, 500)}`);
+          }
+          const redir = j.redirect;
+          if (typeof redir === "string" && redir.trim() !== "") {
+            signinRedirectFromJson = redir.trim();
+          } else {
+            const msg =
+              typeof j.message === "string"
+                ? j.message
+                : typeof j.error === "string"
+                  ? j.error
+                  : bodyText.slice(0, 500);
+            throw new Error(`Sign-in failed: ${msg}`);
+          }
+        } else {
+          throw new Error(
+            "Sign-in POST returned 200 without redirect. Check password, CSRF, or RSA public key PEM.",
+          );
+        }
+      } else {
+        throw new HttpError(postResp.status, postResp.statusText, bodyText);
+      }
+    }
+
+    let code: string;
+    if (signinRedirectFromJson) {
+      const out = await followSigninRedirectsUntilCallback(
+        new URL(signinRedirectFromJson, base).href,
+        jar,
+        state,
+        redirectUri,
+        base,
+        scope,
+      );
+      code = out.code;
+    } else if (postResp.status === 302 || postResp.status === 303 || postResp.status === 307) {
+      const loc = postResp.headers.get("location");
+      if (!loc) {
+        throw new HttpError(postResp.status, "Missing Location after sign-in", "");
+      }
+      const out = await followSigninRedirectsUntilCallback(
+        new URL(loc, base).href,
+        jar,
+        state,
+        redirectUri,
+        base,
+        scope,
+      );
+      code = out.code;
+    } else {
+      throw new Error("HTTP sign-in: exhausted RSA key candidates without redirect");
+    }
+
+    const token = await exchangeCodeForToken(
+      base,
+      code,
+      client.clientId,
+      client.clientSecret,
+      redirectUri,
+      pkce?.verifier,
+      options.tlsInsecure,
+    );
+    const copyCommand = buildCopyCommand(
+      base,
+      client.clientId,
+      client.clientSecret,
+      token.refreshToken,
+      options.tlsInsecure,
+    );
+    process.stderr.write(
+      "\nHTTP sign-in: copy this command for headless hosts:\n\n" + copyCommand + "\n\n",
+    );
+    setCurrentPlatform(base);
+    return token;
+  });
+}
+
 /**
  * Log in on a headless machine using OAuth2 client credentials and a refresh token (no browser).
  * Exchanges the refresh token for a new access token and persists ~/.kweaver/ state.
@@ -1181,6 +1991,16 @@ export async function withTokenRetry<T>(
         throw error;
       }
       const platformUrl = normalizeBaseUrl(token.baseUrl);
+      // env-sourced token: no refresh_token / OAuth client — refresh is impossible.
+      // Surface an env-aware hint instead of telling the user to `auth login` (which writes to disk).
+      if (process.env.KWEAVER_TOKEN && !token.refreshToken) {
+        throw new Error(
+          `Authentication failed (401) for ${platformUrl}. Your KWEAVER_TOKEN appears to be invalid or expired.\n` +
+            `  - Refresh the token and re-export: export KWEAVER_TOKEN=<new-token>\n` +
+            `  - Or run \`kweaver auth login ${platformUrl}\` to save a full session (with refresh_token) to ~/.kweaver/.`,
+          { cause: error },
+        );
+      }
       const envUser = process.env.KWEAVER_USER;
       let latest: TokenConfig | null;
       if (envUser) {
