@@ -882,15 +882,11 @@ Platform URL is optional; defaults to the current active platform (kweaver auth 
     if (KNOWN_CP_VALUE.has(a)) i++;
   }
 
-  const normalizedTarget = resolvePlatformArg(args);
+  const normalizedTarget = resolvePlatformArg(positional ? [positional] : []);
   if (!normalizedTarget) {
     console.error(
       "No platform resolved. Pass <platform-url|alias> or run `kweaver auth use <url|alias>` first.",
     );
-    return 1;
-  }
-  if (!/^https?:\/\//.test(normalizedTarget)) {
-    console.error(`Cannot resolve platform: ${normalizedTarget}. Provide a full URL or a known alias (kweaver auth list).`);
     return 1;
   }
 
