@@ -569,7 +569,7 @@ test("run auth login --no-auth with -u/-p is rejected", async () => {
       "https://example.com", "--no-auth", "-u", "user", "-p", "pass",
     ]);
     assert.equal(code, 1);
-    assert.ok(errors.some((e) => e.includes("--no-auth cannot be used with Playwright")));
+    assert.ok(errors.some((e) => e.includes("--no-auth cannot be used with HTTP sign-in")));
   } finally {
     console.error = origError;
   }

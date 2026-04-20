@@ -234,8 +234,8 @@ result = client.dataflows.execute(
 ## 命令速查
 
 ```bash
-kweaver auth login <url> [--alias name] [--no-browser] [-u user] [-p pass] [--http-signin] [--playwright] [--insecure|-k]
-# -u/-p：默认 HTTP /oauth2/signin；无 studioweb 时已装 Playwright 则回退无头浏览器，否则提示安装；--http-signin 仅 HTTP；--playwright 强制浏览器
+kweaver auth login <url> [--alias name] [--no-browser] [-u user] [-p pass] [--http-signin] [--insecure|-k]
+# -u/-p（无论是否带 --http-signin）：HTTP POST /oauth2/signin（可拿 refresh_token）；缺失的用户名/密码会从 stdin 提示输入（TTY 下密码隐藏）
 kweaver auth login <url> --client-id ID --client-secret S --refresh-token T   （无浏览器主机）
 kweaver auth export [url|alias] [--json]
 kweaver auth status / whoami [url|alias] [--json]   # 无 ~/.kweaver/ 当前平台时可配 KWEAVER_BASE_URL+KWEAVER_TOKEN

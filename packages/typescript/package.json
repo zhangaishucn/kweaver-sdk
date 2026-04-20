@@ -1,6 +1,6 @@
 {
   "name": "@kweaver-ai/kweaver-sdk",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "KWeaver TypeScript SDK — CLI tool and programmatic API for knowledge networks and Decision Agents.",
   "type": "module",
   "main": "./dist/index.js",
@@ -51,21 +51,11 @@
     "@types/node": "^24.6.0",
     "@types/react": "^19.2.14",
     "@types/yargs": "^17.0.35",
-    "playwright": "^1.58.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.3"
   },
-  "peerDependencies": {
-    "playwright": ">=1.40.0"
-  },
-  "peerDependenciesMeta": {
-    "playwright": {
-      "optional": true
-    }
-  },
   "dependencies": {
     "@kweaver-ai/bkn": "^0.1.0",
-    "@playwright/test": "^1.58.2",
     "chardet": "^2.1.1",
     "columnify": "^1.6.0",
     "csv-parse": "^6.2.1",

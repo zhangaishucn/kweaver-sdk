@@ -64,7 +64,7 @@ kweaver [--user <userId|username>] <command> [subcommand] [options]
 
 | 命令组 | 说明 | 常用命令 | 详细参考 |
 |--------|------|---------|---------|
-| `auth` | 认证管理（支持多账号） | `auth login <url> [--alias name]`（简写：`auth <url> [--alias …]`）；可选 `--no-browser`（无浏览器时粘贴回调 URL/code）；`-u`/`-p` 默认先试 HTTP `/oauth2/signin`（无 studioweb 且已装 Playwright 则回退 Playwright）；`-u`/`-p` + `--http-signin` 仅 HTTP；`-u`/`-p` + `--playwright` 强制 Playwright；`auth list`（树形展示所有平台及用户）；`auth users`（列出用户名）；`auth switch --user <username>`（按用户名切换）；全局 `--user <name>` 可免切换使用指定用户凭证（env: `KWEAVER_USER`）；`auth use` / `status` / `logout` / `delete` 支持平台 URL 或别名；**无当前平台时** `auth status` / `whoami` 可用 `KWEAVER_BASE_URL`+`KWEAVER_TOKEN` 兜底（见 `references/auth.md`） | `references/auth.md` |
+| `auth` | 认证管理（支持多账号） | `auth login <url> [--alias name]`（简写：`auth <url> [--alias …]`）；可选 `--no-browser`（无浏览器时粘贴回调 URL/code，或配合 `-u/-p` 走 HTTP `/oauth2/signin`）；`-u`/`-p`（无论是否带 `--http-signin`）走 HTTP `/oauth2/signin`，缺失的用户名/密码从 stdin 提示输入；`auth list`（树形展示所有平台及用户）；`auth users`（列出用户名）；`auth switch --user <username>`（按用户名切换）；全局 `--user <name>` 可免切换使用指定用户凭证（env: `KWEAVER_USER`）；`auth use` / `status` / `logout` / `delete` 支持平台 URL 或别名；**无当前平台时** `auth status` / `whoami` 可用 `KWEAVER_BASE_URL`+`KWEAVER_TOKEN` 兜底（见 `references/auth.md`） | `references/auth.md` |
 | `token` | 打印当前 access token（自动刷新） | `token` | — |
 | `config` | **平台业务域（优先于多数 bkn/agent/ds 操作）** | `config show`, `config list-bd`, `config set-bd <uuid>` | `references/config.md` |
 | `bkn` | BKN 知识网络管理、Schema、查询、Action | `bkn validate`/`push` 默认检测 `.bkn` 编码并规范为 UTF-8，可用 `--no-detect-encoding` 或 `--source-encoding gb18030`；另有 `pull`、`object-type`、`search`、`create-from-ds`/`create-from-csv` 等，见 `references/bkn.md` | `references/bkn.md` |
@@ -120,7 +120,7 @@ kweaver [--user <userId|username>] <command> [subcommand] [options]
 - **不要自行猜测 business_domain 值**。首次使用时运行 `kweaver config show` 或 `kweaver config list-bd` 确认当前 business domain。如果返回 `bd_public (default)` 但命令结果为空，可能需要用 `kweaver config set-bd <uuid>` 设置正确的值（也可用 `config list-bd` 从平台列出后再 `set-bd`，或从平台 UI 请求头中获取 `X-Business-Domain`）
 - Action 执行有副作用，执行前向用户确认
 - **禁止运行 `kweaver auth status` 做预检**。直接执行目标命令，CLI 会自动处理认证和 token 刷新
-- Token 1 小时过期。当 `~/.kweaver/` 中存在 `refresh_token`（通过 OAuth2 登录获得）时，CLI 会**自动刷新**；仅 Playwright cookie 登录（无 `refresh_token`）时需要用户重新运行 `kweaver auth login <url>`。遇到 401 错误时 CLI 会自动尝试刷新，刷新失败才提示用户重新登录
+- Token 1 小时过期。当 `~/.kweaver/` 中存在 `refresh_token`（通过 OAuth2 登录获得）时，CLI 会**自动刷新**；遇到 401 错误时 CLI 会自动尝试刷新，刷新失败才提示用户重新运行 `kweaver auth login <url>`
 
 ## 查询策略（object-type query）
 

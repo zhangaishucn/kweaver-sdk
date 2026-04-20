@@ -535,14 +535,19 @@ function stderrEmphasis(text: string): string {
 /**
  * Headless login: read authorization code from stdin (full callback URL or raw code).
  * Used with `--no-browser` or when automatic browser launch fails.
+ *
+ * `io` is injectable for tests; defaults to `process.stdin` / `process.stderr`.
  */
-async function promptForCode(
+export async function promptForCode(
   authUrl: string,
   state: string,
   port: number,
   pasteMode: "explicit" | "fallback" = "explicit",
+  io?: { input?: NodeJS.ReadableStream; output?: NodeJS.WritableStream },
 ): Promise<string> {
   const { createInterface } = await import("node:readline");
+  const stdin = io?.input ?? process.stdin;
+  const stderr = io?.output ?? process.stderr;
   const intro =
     pasteMode === "explicit"
       ? "Open this URL on any device (use a private/incognito window if you need the full sign-in form):\n\n"
@@ -551,16 +556,24 @@ async function promptForCode(
     "After login, the browser may show an error page (this is expected if nothing listens on localhost).\n" +
     "Copy the FULL URL from the address bar and paste it here, or paste only the authorization code.\n" +
     `The URL looks like: http://127.0.0.1:${port}/callback?code=THIS_PART&state=...\n\n`;
-  process.stderr.write(
+  stderr.write(
     "\n" +
       intro +
       `  ${authUrl}\n\n` +
       stderrEmphasis(pasteInstructions),
   );
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const rl = createInterface({ input: stdin, output: stderr });
+  // The `close` listener exists to surface Ctrl-D / EOF before the user answers.
+  // It MUST be a no-op once the question callback has fired, because `rl.close()`
+  // emits `close` synchronously and would otherwise reject the promise before
+  // `resolve(answer)` runs (race condition that turns valid input into "Login cancelled.").
   const input = await new Promise<string>((resolve, reject) => {
-    rl.on("close", () => reject(new Error("Login cancelled.")));
+    let answered = false;
+    rl.on("close", () => {
+      if (!answered) reject(new Error("Login cancelled."));
+    });
     rl.question("Paste URL or code> ", (answer) => {
+      answered = true;
       rl.close();
       resolve(answer.trim());
     });
@@ -593,6 +606,127 @@ async function promptForCode(
     throw new Error("No authorization code entered.");
   }
   return input;
+}
+
+/**
+ * Prompt the user for a username on stderr (input echoed).
+ *
+ * `io` is injectable for tests; defaults to `process.stdin` / `process.stderr`.
+ */
+export async function promptForUsername(
+  promptLabel = "Username",
+  io?: { input?: NodeJS.ReadableStream; output?: NodeJS.WritableStream },
+): Promise<string> {
+  const { createInterface } = await import("node:readline");
+  const stdin = io?.input ?? process.stdin;
+  const stderr = io?.output ?? process.stderr;
+  const rl = createInterface({ input: stdin, output: stderr });
+  const value = await new Promise<string>((resolve, reject) => {
+    let answered = false;
+    rl.on("close", () => {
+      if (!answered) reject(new Error("Login cancelled."));
+    });
+    rl.question(`${promptLabel}: `, (answer) => {
+      answered = true;
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+  if (!value) {
+    throw new Error(`${promptLabel} is required.`);
+  }
+  return value;
+}
+
+/**
+ * Prompt the user for a password on stderr without echoing keystrokes (TTY only).
+ *
+ * Falls back to a regular readline prompt when stdin is not a TTY (e.g. piped input
+ * during scripted use); callers needing strict no-echo should detect this case themselves.
+ *
+ * `io` is injectable for tests.
+ */
+export async function promptForPassword(
+  promptLabel = "Password",
+  io?: { input?: NodeJS.ReadableStream & { isTTY?: boolean; setRawMode?: (mode: boolean) => unknown }; output?: NodeJS.WritableStream },
+): Promise<string> {
+  const stdin = io?.input ?? (process.stdin as NodeJS.ReadableStream & { isTTY?: boolean; setRawMode?: (mode: boolean) => unknown });
+  const stderr = io?.output ?? process.stderr;
+
+  // Non-TTY (piped, redirected, tests): use regular readline — no masking is possible
+  // without raw mode, so we accept echoed input rather than block forever.
+  if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
+    const { createInterface } = await import("node:readline");
+    const rl = createInterface({ input: stdin, output: stderr });
+    const value = await new Promise<string>((resolve, reject) => {
+      let answered = false;
+      rl.on("close", () => {
+        if (!answered) reject(new Error("Login cancelled."));
+      });
+      rl.question(`${promptLabel}: `, (answer) => {
+        answered = true;
+        rl.close();
+        resolve(answer);
+      });
+    });
+    if (!value) throw new Error(`${promptLabel} is required.`);
+    return value;
+  }
+
+  // TTY: read byte-by-byte in raw mode so keystrokes are not echoed.
+  return new Promise<string>((resolve, reject) => {
+    stderr.write(`${promptLabel}: `);
+    let buf = "";
+    const onData = (chunk: Buffer) => {
+      const s = chunk.toString("utf8");
+      for (const ch of s) {
+        const code = ch.charCodeAt(0);
+        if (ch === "\n" || ch === "\r") {
+          cleanup();
+          stderr.write("\n");
+          if (!buf) {
+            reject(new Error(`${promptLabel} is required.`));
+          } else {
+            resolve(buf);
+          }
+          return;
+        }
+        if (code === 3) {
+          // Ctrl-C
+          cleanup();
+          stderr.write("\n");
+          reject(new Error("Login cancelled."));
+          return;
+        }
+        if (code === 4 && buf.length === 0) {
+          // Ctrl-D on empty buffer -> cancel
+          cleanup();
+          stderr.write("\n");
+          reject(new Error("Login cancelled."));
+          return;
+        }
+        if (code === 8 || code === 127) {
+          // Backspace / DEL
+          buf = buf.slice(0, -1);
+          continue;
+        }
+        if (code < 32) continue; // ignore other control chars
+        buf += ch;
+      }
+    };
+    const cleanup = () => {
+      try { stdin.setRawMode!(false); } catch { /* noop */ }
+      stdin.removeListener("data", onData);
+      if (typeof (stdin as { pause?: () => void }).pause === "function") {
+        (stdin as { pause: () => void }).pause();
+      }
+    };
+    try { stdin.setRawMode!(true); } catch { /* noop */ }
+    if (typeof (stdin as { resume?: () => void }).resume === "function") {
+      (stdin as { resume: () => void }).resume();
+    }
+    stdin.on("data", onData);
+  });
 }
 
 /**
@@ -909,223 +1043,6 @@ async function exchangeCodeForToken(
   return token;
 }
 
-/**
- * Playwright-automated OAuth2 login.
- *
- * Uses the full OAuth2 authorization code flow (same as `oauth2Login`) but
- * automates the browser interaction with Playwright.  This produces a
- * refresh_token so the CLI can auto-refresh without re-login.
- *
- * When `username` and `password` are provided the browser runs headless and
- * fills the login form automatically.  Otherwise it opens a visible browser
- * window for manual login (same UX as the old cookie-based flow).
- */
-export async function playwrightLogin(
-  baseUrl: string,
-  options?: {
-    username?: string;
-    password?: string;
-    port?: number;
-    scope?: string;
-    tlsInsecure?: boolean;
-  },
-): Promise<TokenConfig> {
-  return runWithTlsInsecure(options?.tlsInsecure, async () => {
-  const { createServer } = await import("node:http");
-  const { randomBytes } = await import("node:crypto");
-
-  let chromium: any;
-  try {
-    const modName = "playwright";
-    const pw = await import(/* webpackIgnore: true */ modName);
-    chromium = pw.chromium;
-  } catch {
-    throw new Error(
-      "Playwright is not installed. Run:\n  npm install playwright && npx playwright install chromium"
-    );
-  }
-
-  const base = normalizeBaseUrl(baseUrl);
-  const port = options?.port ?? DEFAULT_REDIRECT_PORT;
-  const scope = options?.scope ?? DEFAULT_SCOPE;
-  const redirectUri = `http://127.0.0.1:${port}/callback`;
-  const hasCredentials = !!(options?.username && options?.password);
-
-  // Step 1: Ensure registered OAuth2 client (with stale-client auto-recovery)
-  let client: ClientConfig;
-  try {
-    client = await resolveOrRegisterClient(base, redirectUri, scope);
-  } catch (e) {
-    if (e instanceof HttpError && e.status === 404) {
-      process.stderr.write(
-        "OAuth2 endpoint not found (404). Saving platform in no-auth mode.\n",
-      );
-      return saveNoAuthPlatform(base, { tlsInsecure: options?.tlsInsecure });
-    }
-    throw e;
-  }
-
-  // Step 2: Generate CSRF state
-  const state = randomBytes(12).toString("hex");
-
-  // Step 3: Build authorization URL
-  const authParams = new URLSearchParams({
-    redirect_uri: redirectUri,
-    "x-forwarded-prefix": "",
-    client_id: client.clientId,
-    scope,
-    response_type: "code",
-    state,
-    lang: "zh-cn",
-    product: "adp",
-  });
-  const authUrl = `${base}/oauth2/auth?${authParams.toString()}`;
-
-  // Step 4: Start local callback server; exchange code inside handler, then show credentials HTML
-  let browser: any;
-  const token = await new Promise<TokenConfig>((resolve, reject) => {
-    const TIMEOUT_MS = hasCredentials ? 30_000 : 120_000;
-    let server: Server;
-    const timeoutId = setTimeout(() => {
-      server?.close();
-      browser?.close();
-      reject(new Error(`OAuth2 login timed out (${TIMEOUT_MS / 1000}s). No authorization code received.`));
-    }, TIMEOUT_MS);
-
-    server = createServer((req, res) => {
-      void (async () => {
-        try {
-          const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
-          if (url.pathname !== "/callback") {
-            res.writeHead(404);
-            res.end();
-            return;
-          }
-
-          const receivedState = url.searchParams.get("state");
-          const receivedCode = url.searchParams.get("code");
-          const callbackError = url.searchParams.get("error");
-          const callbackErrorDesc = url.searchParams.get("error_description");
-
-          if (receivedState !== state) {
-            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(buildCallbackExchangeErrorHtml("OAuth2 state mismatch — possible CSRF attack."));
-            clearTimeout(timeoutId);
-            server.close();
-            browser?.close();
-            reject(new Error("OAuth2 state mismatch — possible CSRF attack."));
-            return;
-          }
-          if (callbackError) {
-            const msg = callbackErrorDesc
-              ? `Authorization failed: ${callbackError} — ${callbackErrorDesc}`
-              : `Authorization failed: ${callbackError}`;
-            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(buildCallbackExchangeErrorHtml(msg));
-            clearTimeout(timeoutId);
-            server.close();
-            browser?.close();
-            reject(new Error(msg));
-            return;
-          }
-          if (!receivedCode) {
-            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(buildCallbackExchangeErrorHtml("No authorization code received in callback."));
-            clearTimeout(timeoutId);
-            server.close();
-            browser?.close();
-            reject(new Error("No authorization code received in callback."));
-            return;
-          }
-
-          const exchanged = await exchangeCodeForToken(
-            base,
-            receivedCode,
-            client.clientId,
-            client.clientSecret,
-            redirectUri,
-            undefined,
-            options?.tlsInsecure,
-          );
-
-          const copyCommand = buildCopyCommand(
-            base,
-            client.clientId,
-            client.clientSecret,
-            exchanged.refreshToken,
-            options?.tlsInsecure,
-          );
-
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-          res.end(buildCallbackHtml(copyCommand));
-
-          clearTimeout(timeoutId);
-          server.close();
-          browser?.close();
-          resolve(exchanged);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          try {
-            res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(buildCallbackExchangeErrorHtml(message));
-          } catch {
-            /* response may already be sent */
-          }
-          clearTimeout(timeoutId);
-          server.close();
-          browser?.close();
-          reject(err instanceof Error ? err : new Error(message));
-        }
-      })();
-    });
-
-    server.listen(port, "127.0.0.1", async () => {
-      try {
-        browser = await chromium.launch({ headless: hasCredentials });
-        const context = await browser.newContext({ ignoreHTTPSErrors: !!options?.tlsInsecure });
-        const page = await context.newPage();
-
-        // Navigate to OAuth2 auth URL — redirects to signin page
-        await page.goto(authUrl, { waitUntil: "networkidle", timeout: 30_000 });
-
-        if (hasCredentials) {
-          // Auto-fill credentials
-          await page.waitForSelector('input[name="account"]', { timeout: 10_000 });
-          await page.fill('input[name="account"]', options!.username!);
-          await page.fill('input[name="password"]', options!.password!);
-          await page.click("button.ant-btn-primary");
-        }
-        // else: visible browser — user logs in manually
-        // The OAuth2 callback will fire when login completes, resolving the promise above
-      } catch (err) {
-        clearTimeout(timeoutId);
-        server.close();
-        browser?.close();
-        reject(err);
-      }
-    });
-  });
-
-  if (hasCredentials) {
-    const copyCommand = buildCopyCommand(
-      base,
-      client.clientId,
-      client.clientSecret,
-      token.refreshToken,
-      options?.tlsInsecure,
-    );
-    process.stderr.write(
-      "\nHeadless login: copy this command and run it on a machine without a browser, or use `kweaver auth export`:\n\n" +
-        copyCommand +
-        "\n\n",
-    );
-  }
-
-  setCurrentPlatform(base);
-  return token;
-  });
-}
-
 function mergeCookieJarForSignin(existing: string, response: Response): string {
   const setCookies =
     typeof response.headers.getSetCookie === "function"
@@ -1276,7 +1193,7 @@ async function followSigninRedirectsUntilCallback(
       }
       throw new Error(
         `Unexpected OAuth page (HTTP 200) at ${url.slice(0, 120)}… ` +
-          `If this is a consent or MFA screen, use browser login or Playwright.`,
+          `If this is a consent or MFA screen, use browser login (kweaver auth login <url>).`,
       );
     }
 
@@ -1350,18 +1267,44 @@ async function tryAcceptConsentAfterSignin(
   return null;
 }
 
-const STUDIOWEB_SHELL_UNAVAILABLE_SNIPPETS = [
-  "Studioweb signin endpoint not available",
-  "Cannot reach studioweb signin endpoint",
-] as const;
-
 /**
- * True when {@link oauth2PasswordSigninLogin} failed because the Studio web sign-in shell
- * (`/interface/studioweb/login`) is missing or unreachable — callers may fall back to Playwright.
+ * Build the JSON body for `POST /oauth2/signin` (matches the browser `oauth2-ui` form).
+ *
+ * `device.client_type` MUST be a value present in the EACP whitelist defined by
+ * `kweaver/deploy/auto_cofig/auto_config.sh`. `console_web` is the canonical CLI value
+ * (also used by `kweaver-admin`); other values such as `unknown` are rejected by strict
+ * deployments with `管理员已禁止此类客户端登录` — surfaced upstream as a `request_forbidden`
+ * `No CSRF value available in the session cookie` error after Hydra discards the rejected
+ * login challenge.
+ *
+ * `vcode` and `dualfactorauthinfo` must be present even when empty; otherwise eachttpserver
+ * returns HTTP 400 (invalid parameter).
  */
-export function isStudiowebShellUnavailableError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return STUDIOWEB_SHELL_UNAVAILABLE_SNIPPETS.some((s) => msg.includes(s));
+export function buildOauth2SigninPostBody(opts: {
+  csrftoken: string;
+  challenge: string;
+  account: string;
+  passwordCipher: string;
+  remember: boolean;
+}): Record<string, unknown> {
+  return {
+    _csrf: opts.csrftoken,
+    challenge: opts.challenge,
+    account: opts.account,
+    password: opts.passwordCipher,
+    vcode: { id: "", content: "" },
+    dualfactorauthinfo: {
+      validcode: { vcode: "" },
+      OTP: { OTP: "" },
+    },
+    remember: opts.remember,
+    device: {
+      name: "",
+      description: "",
+      client_type: "console_web",
+      udids: [],
+    },
+  };
 }
 
 /**
@@ -1415,32 +1358,10 @@ export async function oauth2PasswordSigninLogin(
         ? process.env.KWEAVER_OAUTH_PRODUCT.trim()
         : "adp");
 
-    // Pre-flight: verify studioweb signin shell exists (same entry as deploy auto_config.sh get_token).
-    // If the deployment lacks studioweb, abort before OAuth client registration.
-    const studiowebProbeUrl =
-      `${base}/interface/studioweb/login?lang=zh-cn&state=${encodeURIComponent(state)}` +
-      `&x-forwarded-prefix=&integrated=false&product=${encodeURIComponent(oauthProduct)}&_t=${Date.now()}`;
-    let probeResp: Response;
-    try {
-      probeResp = await fetch(studiowebProbeUrl, { method: "GET", redirect: "manual" });
-    } catch (cause) {
-      throw new Error(
-        `Cannot reach studioweb signin endpoint at ${base}/interface/studioweb/login. ` +
-          `The deployment may not include studioweb. Use \`kweaver auth login ${base}\` ` +
-          `(OAuth code flow) instead.\n  Cause: ${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-    }
-    const probeOk2xx = probeResp.status >= 200 && probeResp.status < 300;
-    const probeOkRedirect = [301, 302, 303, 307, 308].includes(probeResp.status);
-    await probeResp.text().catch(() => "");
-    if (!probeOk2xx && !probeOkRedirect) {
-      throw new Error(
-        `Studioweb signin endpoint not available at ${base}/interface/studioweb/login ` +
-          `(HTTP ${probeResp.status}). The deployment may not include studioweb. ` +
-          `Use \`kweaver auth login ${base}\` (OAuth code flow) instead.`,
-      );
-    }
-
+    // Note: previously we pre-flighted `/interface/studioweb/login` to detect deployments
+    // missing the Studio web shell. The probe added an extra round-trip and was unreliable
+    // (see kweaver-admin which works fine without it). HTTP sign-in only needs `/oauth2/auth`
+    // and `/oauth2/signin`; if either is missing the request below will surface a precise error.
     let client: ClientConfig;
     try {
       client = await resolveOrRegisterClient(base, redirectUri, scope, {
@@ -1537,26 +1458,13 @@ export async function oauth2PasswordSigninLogin(
           ? false
           : process.env.KWEAVER_SIGNIN_PASSWORD_B64_RSA_MIN !== "1";
 
-    // Body shape matches browser `POST /oauth2/signin` (EACP / oauth2-ui); omitting vcode/dualfactorauthinfo
-    // causes 400 from eachttpserver (invalid parameter).
-    const postBody = {
-      _csrf: csrftoken,
+    const postBody = buildOauth2SigninPostBody({
+      csrftoken,
       challenge: loginChallenge,
       account: options.username,
-      password: "",
-      vcode: { id: "", content: "" },
-      dualfactorauthinfo: {
-        validcode: { vcode: "" },
-        OTP: { OTP: "" },
-      },
+      passwordCipher: "",
       remember,
-      device: {
-        name: "",
-        description: "",
-        client_type: "unknown",
-        udids: [],
-      },
-    };
+    });
 
     const origin = new URL(base).origin;
     /** Some gateways (e.g. DIP) return HTTP 200 + `{"redirect":"..."}` instead of 3xx Location. */

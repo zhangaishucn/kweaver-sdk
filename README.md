@@ -234,8 +234,8 @@ result = client.dataflows.execute(
 ## CLI Quick Reference
 
 ```bash
-kweaver auth login <url> [--alias name] [--no-browser] [-u user] [-p pass] [--http-signin] [--playwright] [--insecure|-k]
-# -u/-p: HTTP /oauth2/signin first; if studioweb missing, Playwright fallback when installed, else install hint. --http-signin: HTTP only. --playwright: force browser.
+kweaver auth login <url> [--alias name] [--no-browser] [-u user] [-p pass] [--http-signin] [--insecure|-k]
+# -u/-p (with or without --http-signin): HTTP POST /oauth2/signin (yields refresh_token). Missing -u/-p are prompted from stdin (password hidden on TTY).
 kweaver auth login <url> --client-id ID --client-secret S --refresh-token T   (headless host)
 kweaver auth export [url|alias] [--json]
 kweaver auth status / whoami [url|alias] [--json]   # with KWEAVER_BASE_URL+KWEAVER_TOKEN when no ~/.kweaver/ platform

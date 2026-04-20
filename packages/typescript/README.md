@@ -153,8 +153,8 @@ const skillMd = await client.skills.fetchContent("skill-id");
 ## CLI Reference
 
 ```
-kweaver auth login <url> [--alias name] [--no-auth] [--no-browser] [-u user] [-p pass] [--http-signin] [--playwright] [--insecure|-k]
-# -u/-p: tries HTTP /oauth2/signin first (refresh_token). If studioweb is missing: falls back to Playwright when installed, else prints install hint. --http-signin: HTTP only. --playwright: force browser automation.
+kweaver auth login <url> [--alias name] [--no-auth] [--no-browser] [-u user] [-p pass] [--http-signin] [--insecure|-k]
+# -u/-p (with or without --http-signin): HTTP POST /oauth2/signin (yields refresh_token). Missing -u/-p are prompted from stdin (password hidden when TTY).
 kweaver auth login <url> --client-id ID --client-secret S --refresh-token T   (headless login)
 kweaver auth export [url|alias] [--json]   (export command to run on a headless host)
 kweaver auth status / whoami [url|alias] [--json]   # whoami: --json; with KWEAVER_BASE_URL+KWEAVER_TOKEN when no ~/.kweaver/ platform

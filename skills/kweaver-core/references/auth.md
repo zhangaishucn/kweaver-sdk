@@ -4,17 +4,11 @@
 
 与 CLI 一致：运行 `kweaver auth` 或 `kweaver auth login --help` 可查看与当前版本同步的用法。
 
-## 前提
-
-```bash
-npm install playwright && npx playwright install chromium
-```
-
 ## 命令
 
 ```bash
 kweaver auth login <url> [--alias <name>] [--no-auth] [--no-browser] [-u user] [-p pass]
-                         [--http-signin] [--playwright]
+                         [--http-signin]
                          [--port <n>] [--insecure|-k]
 kweaver auth <url> [--alias <name>] ...              # 同上（简写）
 kweaver auth whoami [url|alias] [--json]              # 显示当前用户身份
@@ -124,10 +118,10 @@ auth.login(no_browser=True)
 
 ## 说明
 
-- **OAuth2 授权码登录**（默认）：获取 `access_token` + `refresh_token`，过期自动刷新
-- **HTTP 密码登录（默认，`-u`/`-p` 且未加 `--http-signin`/`--playwright`）**：优先走 `POST /oauth2/signin`（与 Studio studioweb 壳一致），可拿到 `refresh_token`；公钥优先取页面，否则内置候选。若平台**没有** studioweb 壳：已安装 Playwright 时自动回退 Playwright 无头填表；未安装则终端提示安装 Playwright，或改用 `kweaver auth login <url> --no-browser`。
-- **仅 HTTP 密码登录**（`-u`/`-p` + `--http-signin`）：不尝试 Playwright；studioweb 不可用时直接失败。DIP 可设 `KWEAVER_OAUTH_PRODUCT=dip`。解密失败等见 `packages/typescript/README.md` 环境变量说明。
-- **强制 Playwright**（`-u`/`-p` + `--playwright`）：跳过 HTTP，直接自动化浏览器填表。仅 `--playwright`（无密码）：打开浏览器由用户手动登录。
+- **OAuth2 授权码登录**（默认）：浏览器流程，获取 `access_token` + `refresh_token`，过期自动刷新。
+- **HTTP 密码登录**（`-u`/`-p`，可选 `--http-signin`）：直接 `POST /oauth2/signin`，无需浏览器，可拿到 `refresh_token`。公钥优先取登录页，否则使用内置候选。缺失的 `-u`/`-p` 会从 stdin 提示输入（TTY 下密码隐藏）。DIP 可设 `KWEAVER_OAUTH_PRODUCT=dip`。解密失败等见 `packages/typescript/README.md` 环境变量说明。
+- **`--no-browser` 粘贴流程**（不带 `-u`/`-p`）：打印授权 URL，由用户在任意浏览器登录后粘贴回调 URL 或 `code` 到终端。
+- **`--no-browser` + `-u`/`-p`**：等价于 HTTP 密码登录，缺失字段同样从 stdin 提示。
 - Token 有效期 1 小时
 - `--alias` 设置短名称方便切换
 - `--insecure` / `-k`：跳过 TLS 证书校验（仅用于自签名/内网开发环境）
