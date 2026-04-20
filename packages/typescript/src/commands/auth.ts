@@ -839,10 +839,12 @@ Change the EACP account password via POST /api/eacp/v1/auth1/modifypassword.
 No saved OAuth token is required.
 
 Options:
-  -u, --account <name>       Account / login name (defaults to the current active user on the resolved platform)
+  -u, --account <name>       Account / login name. On TTY, defaults to the current active user
+                             after a confirmation prompt. Required in non-interactive mode.
   -o, --old-password <pwd>   Current password (omit on TTY to be prompted)
   -n, --new-password <pwd>   New password, 6-100 characters (omit on TTY to be prompted)
-  --insecure, -k             Skip TLS certificate verification
+  --insecure, -k             Skip TLS certificate verification (defaults to the platform's saved
+                             preference set at login with -k; pass to override per-call)
 
 Platform URL is optional; defaults to the current active platform (kweaver auth use).`);
     return 0;
@@ -903,20 +905,40 @@ Platform URL is optional; defaults to the current active platform (kweaver auth 
   const activeToken = activeUser ? loadUserTokenConfig(normalizedTarget, activeUser) : null;
   const tlsInsecure = explicitTlsInsecure || activeToken?.tlsInsecure === true;
 
-  if (!account?.trim()) {
+  const interactive = process.stdin.isTTY === true && process.stderr.isTTY === true;
+  const accountWasExplicit = !!account?.trim();
+
+  // Account resolution (with safety guards):
+  // - Explicit -u always wins.
+  // - Non-TTY + no -u: REFUSE. Silently using the active account in CI / pipes
+  //   would let scripts modify the wrong account's password without warning.
+  // - TTY + no -u: default to the active user's displayName, but require an
+  //   interactive yes/no confirmation before proceeding.
+  if (!accountWasExplicit) {
     const defaultAccount = activeToken?.displayName?.trim();
-    if (defaultAccount) {
-      account = defaultAccount;
-      console.log(`Using current account: ${account}`);
-    } else {
+    if (!defaultAccount) {
       console.error(
         "Cannot determine current account on the platform. Pass -u/--account, or log in first (kweaver auth login ...).",
       );
       return 1;
     }
+    if (!interactive) {
+      console.error(
+        `Refusing to default account in non-interactive mode. Pass -u/--account explicitly (would have used "${defaultAccount}").`,
+      );
+      return 1;
+    }
+    const ok = await promptYesNo(
+      `Change password for account "${defaultAccount}" on ${normalizedTarget}?`,
+    );
+    if (!ok) {
+      console.error("Aborted by user.");
+      return 1;
+    }
+    account = defaultAccount;
   }
 
-  const interactive = process.stdin.isTTY === true && process.stderr.isTTY === true;
+  const trimmedAccount = account!.trim();
   try {
     if (!interactive) {
       if (!oldPassword || !newPassword) {
@@ -943,21 +965,23 @@ Platform URL is optional; defaults to the current active platform (kweaver auth 
     validateNewPasswordLengthForEacp(newPassword!);
 
     const result = await eacpModifyPassword(normalizedTarget, {
-      account: account.trim(),
+      account: trimmedAccount,
       oldPassword: oldPassword!,
       newPassword: newPassword!,
       tlsInsecure,
     });
 
     if (!result.ok) {
-      console.error(formatEacpModifyFailure(result.status, result.json, result.body));
+      console.error(
+        `${formatEacpModifyFailure(result.status, result.json, result.body)} (account="${trimmedAccount}")`,
+      );
       return 1;
     }
 
-    console.log(`Password changed for ${account.trim()} on ${normalizedTarget}`);
+    console.log(`Password changed for ${trimmedAccount} on ${normalizedTarget}`);
     return 0;
   } catch (e) {
-    console.error(formatHttpError(e));
+    console.error(`${formatHttpError(e)}\n(account="${trimmedAccount}")`);
     return 1;
   }
 }

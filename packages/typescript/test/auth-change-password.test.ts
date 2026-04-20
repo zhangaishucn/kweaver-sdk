@@ -171,6 +171,8 @@ test("change-password: inherits saved tlsInsecure from platform token", async ()
   try {
     const code = await auth.runAuthCommand([
       "change-password",
+      "-u",
+      "alice",
       "-o",
       "oldsecret",
       "-n",
@@ -185,7 +187,7 @@ test("change-password: inherits saved tlsInsecure from platform token", async ()
   }
 });
 
-test("change-password: omitted -u defaults to active user displayName", async () => {
+test("change-password: non-TTY without -u refuses to default account (safety)", async () => {
   const configDir = createConfigDir();
   process.env.KWEAVERC_CONFIG_DIR = configDir;
   const t = `${Date.now()}-${Math.random()}`;
@@ -207,18 +209,17 @@ test("change-password: omitted -u defaults to active user displayName", async ()
   });
   store.setActiveUser(baseUrl, userId);
 
-  let postBody = "";
+  let fetchCalls = 0;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (requestUrl(input).includes("/api/eacp/v1/auth1/modifypassword")) {
-      postBody = typeof init?.body === "string" ? init.body : "";
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    return new Response("unexpected", { status: 500 });
+  globalThis.fetch = async () => {
+    fetchCalls++;
+    return new Response("{}", { status: 200 });
   };
+  // Force non-TTY for this safety test.
+  const originalStdinIsTTY = process.stdin.isTTY;
+  const originalStderrIsTTY = process.stderr.isTTY;
+  process.stdin.isTTY = false;
+  process.stderr.isTTY = false;
 
   try {
     const code = await auth.runAuthCommand([
@@ -228,11 +229,12 @@ test("change-password: omitted -u defaults to active user displayName", async ()
       "-n",
       "newsecret123456",
     ]);
-    assert.equal(code, 0);
-    const parsed = JSON.parse(postBody) as { account?: string };
-    assert.equal(parsed.account, "alice");
+    assert.equal(code, 1);
+    assert.equal(fetchCalls, 0, "must not POST when -u was defaulted in non-interactive mode");
   } finally {
     globalThis.fetch = originalFetch;
+    process.stdin.isTTY = originalStdinIsTTY;
+    process.stderr.isTTY = originalStderrIsTTY;
   }
 });
 
