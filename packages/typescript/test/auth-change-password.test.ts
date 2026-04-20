@@ -133,6 +133,58 @@ test("change-password: omitted URL falls back to current platform", async () => 
   }
 });
 
+test("change-password: inherits saved tlsInsecure from platform token", async () => {
+  const configDir = createConfigDir();
+  process.env.KWEAVERC_CONFIG_DIR = configDir;
+  const t = `${Date.now()}-${Math.random()}`;
+  const auth = await import(`${pathToFileURL(join(process.cwd(), "src/commands/auth.ts")).href}?${t}`);
+  const store = await import(`${pathToFileURL(join(process.cwd(), "src/config/store.ts")).href}?${t}`);
+
+  const baseUrl = "https://plat.example.com";
+  store.saveNoAuthPlatform(`${baseUrl}/`, { tlsInsecure: true });
+  store.setCurrentPlatform(baseUrl);
+  store.saveTokenConfig({
+    baseUrl,
+    accessToken: "no-auth",
+    tokenType: "Bearer",
+    scope: "",
+    obtainedAt: new Date().toISOString(),
+    displayName: "alice",
+    tlsInsecure: true,
+  });
+  store.setActiveUser(baseUrl, "default");
+
+  let sawInsecure = false;
+  const originalTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    if (requestUrl(input).includes("/api/eacp/v1/auth1/modifypassword")) {
+      if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") sawInsecure = true;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response("unexpected", { status: 500 });
+  };
+
+  try {
+    const code = await auth.runAuthCommand([
+      "change-password",
+      "-o",
+      "oldsecret",
+      "-n",
+      "newsecret123456",
+    ]);
+    assert.equal(code, 0);
+    assert.equal(sawInsecure, true, "expected runtime to use insecure TLS based on saved token");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalTls === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalTls;
+  }
+});
+
 test("change-password: omitted -u defaults to active user displayName", async () => {
   const configDir = createConfigDir();
   process.env.KWEAVERC_CONFIG_DIR = configDir;

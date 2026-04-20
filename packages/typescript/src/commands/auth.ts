@@ -895,13 +895,16 @@ Platform URL is optional; defaults to the current active platform (kweaver auth 
     readOption(flagArgs, "--account") ?? readOption(flagArgs, "-u");
   let oldPassword = readOption(flagArgs, "--old-password") ?? readOption(flagArgs, "-o");
   let newPassword = readOption(flagArgs, "--new-password") ?? readOption(flagArgs, "-n");
-  const tlsInsecure = flagArgs.includes("--insecure") || flagArgs.includes("-k");
+  const explicitTlsInsecure = flagArgs.includes("--insecure") || flagArgs.includes("-k");
 
-  // Default account from the active user on the resolved platform.
+  // Resolve the active user's saved token; we use it both to default the account
+  // and to inherit the platform's saved tlsInsecure preference (set at login with -k).
+  const activeUser = getActiveUser(normalizedTarget);
+  const activeToken = activeUser ? loadUserTokenConfig(normalizedTarget, activeUser) : null;
+  const tlsInsecure = explicitTlsInsecure || activeToken?.tlsInsecure === true;
+
   if (!account?.trim()) {
-    const activeUser = getActiveUser(normalizedTarget);
-    const tok = activeUser ? loadUserTokenConfig(normalizedTarget, activeUser) : null;
-    const defaultAccount = tok?.displayName?.trim();
+    const defaultAccount = activeToken?.displayName?.trim();
     if (defaultAccount) {
       account = defaultAccount;
       console.log(`Using current account: ${account}`);
