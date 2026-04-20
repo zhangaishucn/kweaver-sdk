@@ -95,6 +95,74 @@ test("change-password: non-TTY missing -o / -n exits 1 without fetch", async () 
   }
 });
 
+test("change-password: omitted URL falls back to current platform", async () => {
+  const configDir = createConfigDir();
+  process.env.KWEAVERC_CONFIG_DIR = configDir;
+  const t = `${Date.now()}-${Math.random()}`;
+  const auth = await import(`${pathToFileURL(join(process.cwd(), "src/commands/auth.ts")).href}?${t}`);
+  const store = await import(`${pathToFileURL(join(process.cwd(), "src/config/store.ts")).href}?${t}`);
+
+  store.saveNoAuthPlatform("https://plat.example.com/", { tlsInsecure: false });
+  store.setCurrentPlatform("https://plat.example.com");
+
+  let postUrl = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    postUrl = requestUrl(input);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const code = await auth.runAuthCommand([
+      "change-password",
+      "-u",
+      "alice",
+      "-o",
+      "oldsecret",
+      "-n",
+      "newsecret123456",
+    ]);
+    assert.equal(code, 0);
+    assert.ok(postUrl.startsWith("https://plat.example.com/"), `posted to ${postUrl}`);
+    assert.ok(postUrl.includes("/api/eacp/v1/auth1/modifypassword"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("change-password: omitted URL with no current platform exits 1", async () => {
+  const configDir = createConfigDir();
+  process.env.KWEAVERC_CONFIG_DIR = configDir;
+  const t = `${Date.now()}-${Math.random()}`;
+  const auth = await import(`${pathToFileURL(join(process.cwd(), "src/commands/auth.ts")).href}?${t}`);
+
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalls++;
+    return new Response("{}", { status: 200 });
+  };
+
+  try {
+    const code = await auth.runAuthCommand([
+      "change-password",
+      "-u",
+      "alice",
+      "-o",
+      "oldsecret",
+      "-n",
+      "newsecret123456",
+    ]);
+    assert.equal(code, 1);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("change-password: server 4xx JSON message is surfaced", async () => {
   const configDir = createConfigDir();
   process.env.KWEAVERC_CONFIG_DIR = configDir;
