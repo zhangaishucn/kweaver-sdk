@@ -315,14 +315,50 @@ async function fetchDisplayName(
   return null;
 }
 
-/** POSIX shell single-quote escaping for copy-paste commands. */
-export function shellQuoteForShell(value: string): string {
+/**
+ * Characters that bash/zsh/sh AND cmd.exe/PowerShell all leave untouched when
+ * a value is written without surrounding quotes. Real-world OAuth values
+ * (URLs, UUID-like client IDs, base64url refresh tokens) live in this set, so
+ * we can emit them bare and the resulting command is portable across macOS,
+ * Linux, Windows cmd, and PowerShell — including the copy-mac-paste-to-windows
+ * (and the reverse) workflow.
+ */
+const SHELL_SAFE_VALUE = /^[A-Za-z0-9._:/+=@-]+$/;
+
+/**
+ * Quote a value for safe copy-paste into a shell command.
+ *
+ * Strategy:
+ * - If the value only contains "shell-safe" characters, return it bare. This
+ *   keeps the printed command portable across shells (issue #74: POSIX single
+ *   quotes are literal in cmd.exe, so any quoting locks the line to one OS).
+ * - Otherwise the value contains characters the shell would interpret
+ *   (space, `&`, `|`, `$`, `*`, ...), so we must quote per host shell:
+ *     - win32 (cmd.exe / PowerShell): wrap in `"..."`; embedded `"` -> `""`
+ *     - POSIX (bash/zsh/sh): wrap in `'...'`; embedded `'` -> `'\''`
+ *
+ * `platform` defaults to `process.platform`; passable for tests and for
+ * generating commands targeted at a specific shell.
+ */
+export function shellQuoteForShell(
+  value: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (value !== "" && SHELL_SAFE_VALUE.test(value)) {
+    return value;
+  }
+  if (platform === "win32") {
+    return `"${value.replace(/"/g, `""`)}"`;
+  }
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
  * Build a one-line `kweaver auth login ...` command for headless / other machines.
  * Omits `--client-secret` when empty (PKCE-only client); headless refresh may still require a confidential client.
+ *
+ * `platform` defaults to `process.platform`; pass explicitly in tests or when
+ * generating a command meant for a different OS.
  */
 export function buildCopyCommand(
   baseUrl: string,
@@ -330,13 +366,15 @@ export function buildCopyCommand(
   clientSecret: string,
   refreshToken: string | undefined,
   tlsInsecure?: boolean,
+  platform: NodeJS.Platform = process.platform,
 ): string {
-  const parts = ["kweaver", "auth", "login", shellQuoteForShell(normalizeBaseUrl(baseUrl)), "--client-id", shellQuoteForShell(clientId)];
+  const q = (v: string) => shellQuoteForShell(v, platform);
+  const parts = ["kweaver", "auth", "login", q(normalizeBaseUrl(baseUrl)), "--client-id", q(clientId)];
   if (clientSecret) {
-    parts.push("--client-secret", shellQuoteForShell(clientSecret));
+    parts.push("--client-secret", q(clientSecret));
   }
   if (refreshToken) {
-    parts.push("--refresh-token", shellQuoteForShell(refreshToken));
+    parts.push("--refresh-token", q(refreshToken));
   }
   if (tlsInsecure) {
     parts.push("--insecure");
