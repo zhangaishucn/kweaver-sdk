@@ -79,6 +79,7 @@ def login(
     client_id: str | None = None,
     client_secret: str | None = None,
     new_password: str | None = None,
+    no_auth: bool = False,
     tls_insecure: bool = False,
     open_browser: bool = True,
 ) -> TokenConfig:
@@ -86,13 +87,19 @@ def login(
 
     | Provided                                       | Strategy                                |
     |------------------------------------------------|-----------------------------------------|
+    | no_auth=True                                   | save_no_auth_platform (no network call) |
     | username + password                            | http_signin (no browser, no Playwright) |
     | refresh_token + client_id + client_secret      | refresh-token grant (no browser)        |
     | (none of the above) + open_browser=True        | OAuth2BrowserAuth.login()               |
     | (none of the above) + open_browser=False       | OAuth2BrowserAuth.login(no_browser=True)|
 
+    For all strategies except no_auth=True: if the platform's `/oauth2/auth`
+    or `/oauth2/signin` returns 404 (the platform has no OAuth installed),
+    falls back to no-auth automatically and emits a one-line `RuntimeWarning`.
+
     Returns the saved TokenConfig and sets the platform as active.
-    Raises ValueError if argument combination is ambiguous.
+    Raises ValueError if argument combination is ambiguous (e.g. no_auth=True
+    combined with username/refresh_token).
     """
 ```
 
@@ -105,6 +112,9 @@ from kweaver.auth import (
 
     # one-shot functions
     http_signin,                # 最完整的 HTTP signin（细粒度参数）
+    save_no_auth_platform,      # 显式把 base_url 标记成 no-auth 模式
+    is_no_auth,                 # token == "__NO_AUTH__"
+    NO_AUTH_TOKEN,              # 常量 "__NO_AUTH__"
     eacp_modify_password,
     fetch_eacp_user_info,
 
@@ -154,6 +164,45 @@ def http_signin(
 3. signin 页 `__NEXT_DATA__.publicKey` / `modulus`
 4. `STUDIOWEB_LOGIN_PUBLIC_KEY_PEM` 常量
 
+### No-auth handling（与 TS 完全一致）
+
+```python
+def save_no_auth_platform(
+    base_url: str, *, tls_insecure: bool = False
+) -> TokenConfig:
+    """Mark a platform as no-auth (no OAuth, no token).
+
+    Writes a TokenConfig with accessToken == NO_AUTH_TOKEN ("__NO_AUTH__") to
+    ~/.kweaver/<platform>/token.json and sets the platform as active.
+    No network call is made. Used by:
+      - kweaver.login(..., no_auth=True) — explicit
+      - http_signin / OAuth2BrowserAuth.login on /oauth2/auth 404 — auto-fallback
+    """
+```
+
+`HttpSigninAuth.auth_headers()` 与 `OAuth2BrowserAuth.auth_headers()` 在检测到
+`is_no_auth(token)` 时直接返回 `{}`（与 `ConfigAuth.auth_headers()` 现有行为一致）。
+
+`OAuth2BrowserAuth.login(...)` 与 `http_signin(...)` 在以下情况触发自动 fallback
+（与 TS `oauth2Login` / `oauth2PasswordSigninLogin` 完全一致）：
+
+- `GET /oauth2/auth` 返回 **404**（平台未装 OAuth）
+- `GET /api/dip-hub/v1/login` → redirect 链上任意一跳 **404**
+- `_resolve_or_register_client` 的 `POST /oauth2/clients` 返回 **404**
+
+触发后行为：
+
+1. 不抛异常，调用 `save_no_auth_platform(base_url, tls_insecure=...)`
+2. 用 Python `warnings.warn(..., RuntimeWarning)` 发一条
+   `"OAuth2 endpoint not found (404). Saving platform in no-auth mode."`
+   （等价于 TS 的 `console.error` 一行）
+3. 返回 no-auth TokenConfig
+
+明确**不**触发 fallback 的情况：
+
+- 401 / 403 / 5xx — 视为真实错误，原样抛
+- TLS / DNS / 连接超时 — 原样抛 `httpx` 异常
+
 ## Data Flow — `http_signin`
 
 ```
@@ -197,6 +246,10 @@ http_signin(base_url, username, password, ...)
 | POST signin 其他 4xx/5xx | `RuntimeError(f"OAuth2 sign-in failed: {status} {body[:500]}")` |
 | TLS 验证失败 + `tls_insecure=False` | 原始 `httpx.SSLError` 不吞 |
 | 缺必需参数（如 `username` 空字符串） | `ValueError("username must be a non-empty string")` |
+| `/oauth2/auth` 或 signin 链上 **404** | 不抛错，`save_no_auth_platform`+`warnings.warn(RuntimeWarning)`，返回 no-auth TokenConfig |
+| `kweaver.login(no_auth=True, username="x")` | `ValueError("no_auth=True is mutually exclusive with username/password/refresh_token")` |
+| `refresh_access_token(token)` 但 `is_no_auth(token)` | `RuntimeError(f"Cannot refresh no-auth session for {base_url}.")`（与 TS 一致） |
+| `with_401_refresh_retry` / `with_token_retry` 见到 no-auth token | 跳过 refresh 直接执行原请求一次（与 TS 一致） |
 
 `InitialPasswordChangeRequiredError` 字段：
 
@@ -223,8 +276,9 @@ class InitialPasswordChangeRequiredError(RuntimeError):
 | `test_eacp_modify_password.py` | mock POST `/api/eacp/v1/user/modify-password` + RSA 解密 server-side 看到的 body |
 | `test_eacp_user_info.py` | mock GET `/api/eacp/v1/user/get` 200/401/网络错误 |
 | `test_store_helpers.py` | tmp_path PlatformStore：whoami / list_platforms / list_users / set_active_user / export_credentials |
-| `test_login_top_level.py` | `kweaver.login(...)` 各参数组合 → 选对策略；冲突参数抛 `ValueError` |
-| `test_http_signin_auth_provider.py` | `HttpSigninAuth.auth_headers()` lazy login、token 过期触发 refresh |
+| `test_login_top_level.py` | `kweaver.login(...)` 各参数组合 → 选对策略；冲突参数抛 `ValueError`；`no_auth=True` happy path；`no_auth=True` + `username` 抛错 |
+| `test_http_signin_auth_provider.py` | `HttpSigninAuth.auth_headers()` lazy login、token 过期触发 refresh、no-auth token 返回 `{}` |
+| `test_no_auth.py` | `save_no_auth_platform` 写盘 + 设 active；`http_signin` 遇 404 自动 fallback + 发 `RuntimeWarning`；`OAuth2BrowserAuth.login` 遇 404 自动 fallback；`ConfigAuth` / `HttpSigninAuth` / `OAuth2BrowserAuth` 在 no-auth token 下 `auth_headers() == {}`；no-auth token 调 refresh 抛 `RuntimeError` |
 
 ### TS↔Python 一致性测试
 
@@ -259,7 +313,7 @@ class InitialPasswordChangeRequiredError(RuntimeError):
 
 ## File Touch List
 
-**Create (18):**
+**Create (19):**
 
 - `packages/python/src/kweaver/auth/__init__.py`
 - `packages/python/src/kweaver/auth/_crypto.py`
@@ -276,6 +330,7 @@ class InitialPasswordChangeRequiredError(RuntimeError):
 - `packages/python/tests/unit/auth/test_store_helpers.py`
 - `packages/python/tests/unit/auth/test_login_top_level.py`
 - `packages/python/tests/unit/auth/test_http_signin_auth_provider.py`
+- `packages/python/tests/unit/auth/test_no_auth.py`
 - `packages/python/tests/unit/auth/test_ts_parity.py`
 - `packages/python/tests/fixtures/signin_post_body_basic.json`（由 TS 测试生成）
 - `packages/python/tests/fixtures/signin_page_basic.html`（拷贝自 TS 测试）
@@ -307,6 +362,7 @@ class InitialPasswordChangeRequiredError(RuntimeError):
 - ✅ Q3 PasswordAuth：删除（A）
 - ✅ Q4 HTTP signin 深度：1:1 等价（A）
 - ✅ Q5 SDK ↔ CLI 行为差：SDK 不交互、不打印、纯函数返回/抛错
+- ✅ Q6 No-auth：保留显式 `no_auth=True` 入口 + 404 自动 fallback（与 TS 一致）
 
 ## Acceptance Criteria
 
@@ -322,3 +378,8 @@ class InitialPasswordChangeRequiredError(RuntimeError):
 4. `tests/unit/auth/test_ts_parity.py` 所有 fixture 与 TS 输出 byte-equal。
 5. 在已存在的 401001017 部署上，`http_signin(..., new_password="newpwd")` 自动改密
    并重试成功。
+6. 在没有 OAuth 的部署上：
+   - `kweaver.login(url, no_auth=True)` 一行写入 no-auth platform，无网络请求；
+   - `kweaver.login(url, username="x", password="y")` 在 `/oauth2/auth` 返回 404
+     时自动 fallback 到 no-auth，发一条 `RuntimeWarning`，不抛错；
+   - 后续 `KWeaver(auth=ConfigAuth())` 调 API 时 `Authorization` header 不出现。
