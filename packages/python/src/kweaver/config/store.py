@@ -18,7 +18,27 @@ from pathlib import Path
 from typing import Any
 
 
-_DEFAULT_ROOT = Path.home() / ".kweaver"
+def _default_kweaver_root() -> Path:
+    """Resolve store root at use time so tests (and shells) can override HOME."""
+    return Path.home() / ".kweaver"
+
+
+def iso_z(dt: "datetime | None" = None) -> str:
+    """Return UTC timestamp matching JS ``new Date().toISOString()``: ``YYYY-MM-DDTHH:MM:SS.sssZ``.
+
+    Used for token files so Python-written ``~/.kweaver/`` is byte-shape compatible
+    with the TypeScript CLI (millisecond precision + ``Z`` suffix).
+    """
+    from datetime import datetime, timezone
+
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    ms = dt.microsecond // 1000
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
 
 _USER_SCOPED_FILES = {"token.json", "config.json", "context-loader.json"}
 
@@ -89,7 +109,7 @@ class PlatformStore:
     """Manage multi-platform KWeaver credentials in ~/.kweaver/."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self._root = root or _DEFAULT_ROOT
+        self._root = root if root is not None else _default_kweaver_root()
         self._migrate_all_to_user_scoped()
 
     def _state_path(self) -> Path:
@@ -465,7 +485,9 @@ class PlatformStore:
         udir.mkdir(parents=True, exist_ok=True)
         if sys.platform != "win32":
             os.chmod(udir, 0o700)
-        _write_json(udir / "token.json", data)
+        base = url.rstrip("/")
+        record = {**data, "baseUrl": base}
+        _write_json(udir / "token.json", record)
         # When KWEAVER_USER is set the caller is doing a one-off operation;
         # don't change the persisted active user.
         if not os.environ.get("KWEAVER_USER"):
@@ -483,7 +505,7 @@ class PlatformStore:
             "accessToken": NO_AUTH_TOKEN,
             "tokenType": "none",
             "scope": "",
-            "obtainedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "obtainedAt": iso_z(),
         }
         if tls_insecure:
             data["tlsInsecure"] = True

@@ -9,6 +9,12 @@ from typing import Protocol
 
 import httpx
 
+from kweaver.config.store import iso_z
+
+
+class _NoAuthFallback(Exception):
+    """Internal sentinel for 404 → no-auth conversion."""
+
 
 def _env_tls_insecure() -> bool:
     """True when KWEAVER_TLS_INSECURE is 1 or true (dev / scripting only)."""
@@ -71,84 +77,6 @@ class TokenAuth:
 
     def __repr__(self) -> str:
         return "TokenAuth(token='***')"
-
-
-class PasswordAuth:
-    """Browser-based OAuth2 login with auto-refresh.
-
-    Uses Playwright (headless) to automate the Ory OAuth2 login flow:
-      1. GET {base_url}/api/dip-hub/v1/login → OAuth2 redirect → signin page
-      2. Fill account/password → click login
-      3. Extract dip.oauth2_token cookie after callback
-
-    Token is cached and refreshed on demand when expired or on auth error.
-    Requires: ``pip install playwright && playwright install chromium``
-    """
-
-    # Refresh every 4 minutes (Ory tokens expire in ~5 min)
-    _REFRESH_INTERVAL = 240
-
-    def __init__(self, base_url: str, username: str, password: str) -> None:
-        self._base_url = base_url.rstrip("/")
-        self._username = username
-        self._password = password
-        self._token: str | None = None
-        self._expires_at: float = 0.0
-        self._lock = threading.Lock()
-
-    def auth_headers(self) -> dict[str, str]:
-        with self._lock:
-            if self._token is None or time.time() >= self._expires_at:
-                self._refresh()
-            return {"Authorization": f"Bearer {self._token}"}
-
-    def refresh(self) -> str:
-        """Force a token refresh and return the new token."""
-        with self._lock:
-            return self._refresh()
-
-    def _refresh(self) -> str:
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
-            page = context.new_page()
-
-            page.goto(
-                f"{self._base_url}/api/dip-hub/v1/login",
-                wait_until="networkidle",
-                timeout=30000,
-            )
-
-            page.fill('input[name="account"]', self._username)
-            page.fill('input[name="password"]', self._password)
-            page.click("button.ant-btn-primary")
-
-            token = None
-            for _ in range(30):
-                time.sleep(1)
-                for cookie in context.cookies():
-                    if cookie["name"] == "dip.oauth2_token":
-                        token = cookie["value"]
-                        break
-                if token:
-                    break
-
-            browser.close()
-
-        if not token:
-            raise RuntimeError(
-                "Failed to extract KWeaver token after browser login. "
-                "Check username/password."
-            )
-
-        self._token = token
-        self._expires_at = time.time() + self._REFRESH_INTERVAL
-        return token
-
-    def __repr__(self) -> str:
-        return f"PasswordAuth(username={self._username!r})"
 
 
 class OAuth2Auth:
@@ -219,6 +147,20 @@ class ConfigAuth:
         if not url:
             raise RuntimeError("No active platform. Run 'kweaver auth login' first.")
         return url
+
+    @property
+    def tls_insecure(self) -> bool:
+        """Return the saved ``tlsInsecure`` flag for the active platform.
+
+        Lets ``KWeaverClient`` automatically skip TLS verification for self-signed
+        deployments without callers having to repeat ``tls_insecure=True`` after
+        ``kweaver auth login --insecure`` succeeded.
+        """
+        try:
+            token = self._store.load_token(self.base_url)
+        except Exception:
+            return _env_tls_insecure()
+        return bool(token.get("tlsInsecure")) or _env_tls_insecure()
 
     def auth_headers(self) -> dict[str, str]:
         with self._lock:
@@ -307,10 +249,10 @@ class ConfigAuth:
             "tokenType": data.get("token_type", "Bearer"),
             "scope": data.get("scope", token_data.get("scope", "")),
             "expiresIn": expires_in,
-            "expiresAt": (now + timedelta(seconds=expires_in)).isoformat(),
+            "expiresAt": iso_z(now + timedelta(seconds=expires_in)),
             "refreshToken": data.get("refresh_token", refresh_token),
             "idToken": data.get("id_token", token_data.get("idToken", "")),
-            "obtainedAt": now.isoformat(),
+            "obtainedAt": iso_z(now),
         }
         if token_data.get("tlsInsecure"):
             new_token["tlsInsecure"] = True
@@ -464,6 +406,20 @@ class OAuth2BrowserAuth:
                 callback URL or code from stdin. If False and :func:`webbrowser.open` fails,
                 the same paste flow is used automatically.
         """
+        import warnings
+
+        try:
+            self._login_impl(no_browser=no_browser)
+        except _NoAuthFallback:
+            warnings.warn(
+                "OAuth2 endpoint not found (404). Saving platform in no-auth mode.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            self._store.save_no_auth_platform(self._base_url, tls_insecure=self._tls_insecure)
+            self._store.use(self._base_url)
+
+    def _login_impl(self, *, no_browser: bool = False) -> None:
         import secrets
         import webbrowser
         from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -551,6 +507,30 @@ class OAuth2BrowserAuth:
         # Set as active platform
         self._store.use(self._base_url)
 
+    def login_with_refresh_token(
+        self,
+        *,
+        client_id: str,
+        client_secret: str,
+        refresh_token: str,
+    ) -> None:
+        """Headless first-time login: exchange a known refresh_token for tokens."""
+        client = {
+            "baseUrl": self._base_url,
+            "clientId": client_id,
+            "clientSecret": client_secret,
+            "redirectUri": self._resolve_redirect_uri(),
+            "scope": self._scope,
+            "lang": self._lang,
+            "product": "adp",
+        }
+        seed_token: dict = {"refreshToken": refresh_token}
+        if self._tls_insecure:
+            seed_token["tlsInsecure"] = True
+        self._refresh_token(seed_token, client)
+        self._store.save_client(self._base_url, client)
+        self._store.use(self._base_url)
+
     def _is_client_still_valid(self, client_id: str, redirect_uri: str) -> bool:
         """Pre-flight check: verify cached client exists on the server."""
         from urllib.parse import urlencode
@@ -635,6 +615,8 @@ class OAuth2BrowserAuth:
             headers={"Content-Type": "application/json", "Accept": "application/json"},
             verify=verify,
         )
+        if resp.status_code == 404:
+            raise _NoAuthFallback()
         resp.raise_for_status()
         data = resp.json()
 
@@ -683,10 +665,10 @@ class OAuth2BrowserAuth:
             "tokenType": data.get("token_type", "Bearer"),
             "scope": data.get("scope", ""),
             "expiresIn": expires_in,
-            "expiresAt": (now + timedelta(seconds=expires_in)).isoformat(),
+            "expiresAt": iso_z(now + timedelta(seconds=expires_in)),
             "refreshToken": data.get("refresh_token", ""),
             "idToken": data.get("id_token", ""),
-            "obtainedAt": now.isoformat(),
+            "obtainedAt": iso_z(now),
         }
         if self._tls_insecure:
             token_data["tlsInsecure"] = True
@@ -706,6 +688,11 @@ class OAuth2BrowserAuth:
                 raise RuntimeError(
                     f"Not logged in to {self._base_url}. Call login() first."
                 )
+
+            from kweaver.config.no_auth import is_no_auth
+
+            if is_no_auth(token_data.get("accessToken", "")):
+                return {}
 
             # Check expiration and refresh if needed
             expires_at = token_data.get("expiresAt")
@@ -761,10 +748,10 @@ class OAuth2BrowserAuth:
             "tokenType": data.get("token_type", "Bearer"),
             "scope": data.get("scope", token_data.get("scope", "")),
             "expiresIn": expires_in,
-            "expiresAt": (now + timedelta(seconds=expires_in)).isoformat(),
+            "expiresAt": iso_z(now + timedelta(seconds=expires_in)),
             "refreshToken": data.get("refresh_token", token_data.get("refreshToken", "")),
             "idToken": data.get("id_token", token_data.get("idToken", "")),
-            "obtainedAt": now.isoformat(),
+            "obtainedAt": iso_z(now),
         }
         if token_data.get("tlsInsecure") or self._tls_insecure:
             new_token["tlsInsecure"] = True
@@ -796,3 +783,71 @@ class OAuth2BrowserAuth:
 
     def __repr__(self) -> str:
         return f"OAuth2BrowserAuth(base_url={self._base_url!r})"
+
+
+def _token_expired(token_data: dict) -> bool:
+    expires_at = token_data.get("expiresAt")
+    if not expires_at:
+        return False
+    try:
+        from datetime import datetime, timezone
+
+        dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        return (dt - datetime.now(timezone.utc)).total_seconds() < 60
+    except (ValueError, TypeError):
+        return False
+
+
+class HttpSigninAuth:
+    """AuthProvider using HTTP /oauth2/signin (no browser, no Playwright).
+
+    Lazy: calls http_signin on first auth_headers() when needed, then uses ~/.kweaver/.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        username: str,
+        password: str,
+        new_password: str | None = None,
+        signin_public_key_pem: str | None = None,
+        tls_insecure: bool = False,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._username = username
+        self._password = password
+        self._new_password = new_password
+        self._signin_public_key_pem = signin_public_key_pem
+        self._tls_insecure = tls_insecure
+        self._lock = threading.Lock()
+
+    def auth_headers(self) -> dict[str, str]:
+        from kweaver.auth import http_signin
+        from kweaver.config.no_auth import is_no_auth
+        from kweaver.config.store import PlatformStore
+
+        with self._lock:
+            store = PlatformStore()
+            token_data = store.load_token(self._base_url)
+            need_login = (
+                not token_data
+                or not token_data.get("accessToken")
+                or _token_expired(token_data)
+            )
+            if need_login:
+                token_data = http_signin(
+                    self._base_url,
+                    username=self._username,
+                    password=self._password,
+                    new_password=self._new_password,
+                    signin_public_key_pem=self._signin_public_key_pem,
+                    tls_insecure=self._tls_insecure,
+                )
+            access = token_data.get("accessToken", "")
+            if is_no_auth(access):
+                return {}
+            return {"Authorization": f"Bearer {access}"}
+
+    def __repr__(self) -> str:
+        return f"HttpSigninAuth(base_url={self._base_url!r}, username={self._username!r})"
