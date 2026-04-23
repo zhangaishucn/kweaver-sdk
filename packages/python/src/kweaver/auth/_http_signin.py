@@ -21,8 +21,12 @@ from kweaver.auth._crypto import (
     rsa_modulus_hex_to_spki_pem,
 )
 from kweaver.auth._signin_html import parse_signin_page_html_props
-from kweaver.auth.eacp import InitialPasswordChangeRequiredError, eacp_modify_password
-from kweaver.config.store import PlatformStore
+from kweaver.auth.eacp import (
+    InitialPasswordChangeRequiredError,
+    eacp_modify_password,
+    fetch_eacp_user_info,
+)
+from kweaver.config.store import PlatformStore, iso_z
 
 _DEFAULT_REDIRECT_PORT = 9010
 _DEFAULT_SCOPE = "openid offline all"
@@ -128,9 +132,11 @@ def _resolve_or_register_client(base: str, port: int, *, tls_insecure: bool) -> 
         "clientId": data["client_id"],
         "clientSecret": data["client_secret"],
         "redirectUri": redirect_uri,
+        "logoutRedirectUri": redirect_uri.rsplit("/", 1)[0] + "/successful-logout",
         "scope": _DEFAULT_SCOPE,
         "lang": "zh-cn",
         "product": "adp",
+        "xForwardedPrefix": "",
     }
     store.save_client(base, client)
     return client
@@ -167,10 +173,10 @@ def _exchange_code(
         "tokenType": data.get("token_type", "Bearer"),
         "scope": data.get("scope", ""),
         "expiresIn": expires_in,
-        "expiresAt": (now + timedelta(seconds=expires_in)).isoformat(),
+        "expiresAt": iso_z(now + timedelta(seconds=expires_in)),
         "refreshToken": data.get("refresh_token", ""),
         "idToken": data.get("id_token", ""),
-        "obtainedAt": now.isoformat(),
+        "obtainedAt": iso_z(now),
     }
 
 
@@ -417,6 +423,14 @@ def http_signin(
         )
         if tls_insecure:
             token["tlsInsecure"] = True
+
+        info = fetch_eacp_user_info(
+            base, access_token=token["accessToken"], tls_insecure=tls_insecure
+        )
+        if info:
+            display_name = info.get("account") or info.get("name")
+            if display_name:
+                token["displayName"] = display_name
 
         store = PlatformStore()
         store.save_token(base, token)

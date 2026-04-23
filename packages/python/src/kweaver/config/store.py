@@ -22,6 +22,24 @@ def _default_kweaver_root() -> Path:
     """Resolve store root at use time so tests (and shells) can override HOME."""
     return Path.home() / ".kweaver"
 
+
+def iso_z(dt: "datetime | None" = None) -> str:
+    """Return UTC timestamp matching JS ``new Date().toISOString()``: ``YYYY-MM-DDTHH:MM:SS.sssZ``.
+
+    Used for token files so Python-written ``~/.kweaver/`` is byte-shape compatible
+    with the TypeScript CLI (millisecond precision + ``Z`` suffix).
+    """
+    from datetime import datetime, timezone
+
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    ms = dt.microsecond // 1000
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
+
 _USER_SCOPED_FILES = {"token.json", "config.json", "context-loader.json"}
 
 
@@ -487,7 +505,7 @@ class PlatformStore:
             "accessToken": NO_AUTH_TOKEN,
             "tokenType": "none",
             "scope": "",
-            "obtainedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "obtainedAt": iso_z(),
         }
         if tls_insecure:
             data["tlsInsecure"] = True

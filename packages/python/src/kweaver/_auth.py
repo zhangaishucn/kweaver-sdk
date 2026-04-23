@@ -9,6 +9,8 @@ from typing import Protocol
 
 import httpx
 
+from kweaver.config.store import iso_z
+
 
 class _NoAuthFallback(Exception):
     """Internal sentinel for 404 → no-auth conversion."""
@@ -233,10 +235,10 @@ class ConfigAuth:
             "tokenType": data.get("token_type", "Bearer"),
             "scope": data.get("scope", token_data.get("scope", "")),
             "expiresIn": expires_in,
-            "expiresAt": (now + timedelta(seconds=expires_in)).isoformat(),
+            "expiresAt": iso_z(now + timedelta(seconds=expires_in)),
             "refreshToken": data.get("refresh_token", refresh_token),
             "idToken": data.get("id_token", token_data.get("idToken", "")),
-            "obtainedAt": now.isoformat(),
+            "obtainedAt": iso_z(now),
         }
         if token_data.get("tlsInsecure"):
             new_token["tlsInsecure"] = True
@@ -649,10 +651,10 @@ class OAuth2BrowserAuth:
             "tokenType": data.get("token_type", "Bearer"),
             "scope": data.get("scope", ""),
             "expiresIn": expires_in,
-            "expiresAt": (now + timedelta(seconds=expires_in)).isoformat(),
+            "expiresAt": iso_z(now + timedelta(seconds=expires_in)),
             "refreshToken": data.get("refresh_token", ""),
             "idToken": data.get("id_token", ""),
-            "obtainedAt": now.isoformat(),
+            "obtainedAt": iso_z(now),
         }
         if self._tls_insecure:
             token_data["tlsInsecure"] = True
@@ -732,10 +734,10 @@ class OAuth2BrowserAuth:
             "tokenType": data.get("token_type", "Bearer"),
             "scope": data.get("scope", token_data.get("scope", "")),
             "expiresIn": expires_in,
-            "expiresAt": (now + timedelta(seconds=expires_in)).isoformat(),
+            "expiresAt": iso_z(now + timedelta(seconds=expires_in)),
             "refreshToken": data.get("refresh_token", token_data.get("refreshToken", "")),
             "idToken": data.get("id_token", token_data.get("idToken", "")),
-            "obtainedAt": now.isoformat(),
+            "obtainedAt": iso_z(now),
         }
         if token_data.get("tlsInsecure") or self._tls_insecure:
             new_token["tlsInsecure"] = True
