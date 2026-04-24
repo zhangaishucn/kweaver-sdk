@@ -108,6 +108,8 @@ Usage:
   kweaver toolbox list [--keyword X] [--limit N] [--offset N] [-bd value]
   kweaver toolbox publish|unpublish <box-id> [-bd value]
   kweaver toolbox delete <box-id> [-y] [-bd value]
+  kweaver toolbox export <box-id> [-o <file>|-] [--type toolbox|mcp|operator]
+  kweaver toolbox import <file> [--type toolbox|mcp|operator]
 
   kweaver tool upload --toolbox <box-id> <openapi-spec-path> [--metadata-type openapi]
   kweaver tool list --toolbox <box-id> [-bd value]
@@ -146,7 +148,7 @@ Commands:
                  object-type, relation-type, subgraph, action-type, action-execution, action-log)
   config         Per-platform configuration (business domain)
   skill          Skill registry and market (register, search, progressive read, download/install)
-  toolbox        Agent toolbox lifecycle (create, list, publish, delete)
+  toolbox        Agent toolbox lifecycle (create, list, publish, delete, export, import)
   tool           Tools inside a toolbox (upload OpenAPI spec, list, enable/disable)
   vega           Vega observability (catalog, resource, query/sql, connector-type, health/stats/inspect)
   context-loader Context-loader MCP (config, tools, resources, prompts, kn-search, query-*, etc.)

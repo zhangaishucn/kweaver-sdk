@@ -59,9 +59,12 @@ def auto_select_business_domain(
             return "bd_public"
         store.save_business_domain(platform_url, selected)
         return selected
-    except Exception as e:
-        print(
-            f"Could not fetch business domains: {e}. Using bd_public.",
-            file=sys.stderr,
-        )
+    except Exception:
+        # Endpoint may be unavailable on this deployment or for this account
+        # type — fall back silently. Set KWEAVER_DEBUG=1 for diagnostics.
+        if os.environ.get("KWEAVER_DEBUG"):
+            print(
+                "Business domain list unavailable; defaulting to bd_public.",
+                file=sys.stderr,
+            )
         return "bd_public"
