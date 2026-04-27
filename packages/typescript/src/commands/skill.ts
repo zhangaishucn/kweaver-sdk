@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { ensureValidToken, formatHttpError, with401RefreshRetry } from "../auth/oauth.js";
 import { resolveBusinessDomain } from "../config/store.js";
@@ -13,11 +13,11 @@ import {
   listSkillMarket,
   listSkills,
   readSkillFile,
-  registerSkillContent,
   registerSkillZip,
   updateSkillStatus,
   type SkillStatus,
 } from "../api/skills.js";
+import { bundleSkillDirectoryToZip, bundleSkillFileToZip } from "../utils/skill-bundle.js";
 
 interface BaseOptions {
   businessDomain: string;
@@ -81,7 +81,15 @@ function printSkillHelp(subcommand?: string): void {
   }
   if (subcommand === "register") {
     console.log(`kweaver skill register (--content-file <path> | --zip-file <path>)
-                       [--source src] [--extend-info json] [-bd value] [--pretty|--compact]`);
+                       [--source src] [--extend-info json] [-bd value] [--pretty|--compact]
+
+  --content-file accepts either:
+    - a single file named SKILL.md (auto-bundled into a 1-file zip)
+    - a skill directory containing SKILL.md (bundled into a zip)
+  Both paths upload as multipart zip; the backend's file_type=content
+  registration is unreliable (publish-then-read returns 404) so the CLI
+  always goes through zip.
+  --zip-file accepts a pre-built .zip with SKILL.md at the archive root.`);
     return;
   }
   if (subcommand === "set-status" || subcommand === "status") {
@@ -115,6 +123,7 @@ Subcommands:
   market [--name kw] [--source src] [--page N] [--page-size N] [-bd value]
   get <skill-id> [-bd value]
   register --content-file <path> | --zip-file <path> [--source src] [--extend-info json]
+           (--content-file accepts a file named SKILL.md or a directory; both auto-zip)
   set-status <skill-id> <unpublish|published|offline> [-bd value]
   delete <skill-id> [-y] [-bd value]
   content <skill-id> [--raw] [--output file] [-bd value]
@@ -466,13 +475,23 @@ export async function runSkillCommand(args: string[]): Promise<number> {
       if (subcommand === "register") {
         const opts = parseSkillRegisterArgs(rest);
         if (opts.contentFile) {
-          const content = readFileSync(resolve(opts.contentFile), "utf8");
-          const result = await registerSkillContent({
+          // Always bundle into zip — the backend's file_type=content path
+          // doesn't write skill_file_index, so SKILL.md is unreachable
+          // after publish via /skills/:id/content. Going through zip
+          // (single SKILL.md or full directory) is the only path that
+          // produces a readable skill end-to-end.
+          const abs = resolve(opts.contentFile);
+          const stat = statSync(abs);
+          const bytes = stat.isDirectory()
+            ? await bundleSkillDirectoryToZip(abs)
+            : await bundleSkillFileToZip(abs);
+          const result = await registerSkillZip({
             ...token,
             businessDomain: opts.businessDomain,
-            content,
             source: opts.source,
             extendInfo: opts.extendInfo,
+            filename: `${basename(abs).replace(/\.zip$/i, "")}.zip`,
+            bytes,
           });
           console.log(format(result, opts.pretty));
           return 0;
